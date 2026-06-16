@@ -1,0 +1,16 @@
+[project]
+name = "wechatnum"
+version = "0.1.0"
+description = "A股量化交易研究：微信指数 + 涨停策略 + 回测分析"
+requires-python = ">=3.11"
+dependencies = [
+    "requests",
+    "pandas",
+    "akshare",
+    "baostock",
+    "tqdm",
+    "numpy",
+    "matplotlib",
+    "openpyxl",
+    "pyarrow",
+]
