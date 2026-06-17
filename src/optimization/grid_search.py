@@ -14,7 +14,7 @@ import baostock as bs
 # =========================
 # 配置区
 # =========================
-EXCEL_PATH = "全年回测2025.xlsx"   # 改成你的路径
+EXCEL_PATH = "results/2025/full_year_backtest_enhanced.xlsx"
 SHEET_NAME = "pools_all"
 CACHE_DIR = "./bs_cache"          # K线缓存目录（强烈建议开启）
 os.makedirs(CACHE_DIR, exist_ok=True)
@@ -393,9 +393,10 @@ def main():
         bs_logout()
 
     # 输出结果
-    grid_df.to_csv("grid_results.csv", index=False, encoding="utf-8-sig")
+    os.makedirs("results/2025", exist_ok=True)
+    grid_df.to_csv("results/2025/grid_results.csv", index=False, encoding="utf-8-sig")
     if best_trades is not None:
-        best_trades.to_csv("best_trades.csv", index=False, encoding="utf-8-sig")
+        best_trades.to_csv("results/2025/grid_best_trades.csv", index=False, encoding="utf-8-sig")
 
     print("\nTop 10 parameter sets:")
     print(grid_df.head(10))
@@ -403,7 +404,7 @@ def main():
     if best_trades is not None and not best_trades.empty:
         best_row = grid_df.iloc[0].to_dict()
         print("\nBest params:", best_row)
-        print("Saved: grid_results.csv, best_trades.csv")
+        print("Saved: results/2025/grid_results.csv, results/2025/grid_best_trades.csv")
 
 
 if __name__ == "__main__":

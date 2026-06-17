@@ -10,7 +10,7 @@ import baostock as bs
 BASE_DIR = "股价数据_parquet_fq"
 DATA_DIR = os.path.join(BASE_DIR, "kline_fq")  # 第一次脚本的日线前复权 parquet 目录
 
-OUT_CSV = "2023涨停.csv"
+OUT_CSV = "data/limit_up/2023.csv"
 START_DATE = "2023-01-01"
 END_DATE = "2023-12-31"
 

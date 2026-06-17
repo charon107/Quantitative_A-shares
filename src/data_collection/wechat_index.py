@@ -44,7 +44,12 @@ def _load_credentials() -> tuple[str, str]:
     if openid and search_key:
         return openid, search_key
 
-    ini_path = os.path.join(os.path.dirname(__file__), "wechat_search_config.ini")
+    # 优先从 config/ 目录读取（项目根目录下），兼容直接放在脚本旁边的旧位置
+    _script_dir = os.path.dirname(os.path.abspath(__file__))
+    _project_root = os.path.dirname(os.path.dirname(_script_dir))
+    ini_path = os.path.join(_project_root, "config", "wechat_search_config.ini")
+    if not os.path.exists(ini_path):
+        ini_path = os.path.join(_script_dir, "wechat_search_config.ini")
     if os.path.exists(ini_path):
         cfg = configparser.ConfigParser()
         cfg.read(ini_path, encoding="utf-8")

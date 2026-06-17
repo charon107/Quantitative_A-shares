@@ -3,7 +3,7 @@ import pandas as pd
 import akshare as ak
 from datetime import datetime
 
-out_csv = "202526涨停.csv"   # 目标CSV文件名（已有就追加，没有就新建）
+out_csv = "data/limit_up/2025_2026.csv"   # 目标CSV文件名（已有就追加，没有就新建）
 
 # （可选）只要沪深主板
 ONLY_MAIN_BOARD = False

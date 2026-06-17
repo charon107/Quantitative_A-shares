@@ -5,7 +5,7 @@ from openpyxl import load_workbook
 # =========================
 # 配置区
 # =========================
-ZT_CSV = "202526涨停.csv"
+ZT_CSV = "data/limit_up/2025_2026.csv"
 PARQUET_DIR = os.path.join("股价数据_parquet_fq", "kline_fq")
 OUT_XLSX = "2025涨停次日开盘买入_涨停当日MA多头且不过热V2_MA20近5日单调递增_MA5近5日单调递增_多头已持续5天_未来30日最大涨幅回撤.xlsx"
 
