@@ -20,3 +20,6 @@ __pycache__/
 
 # IDE
 .idea/
+
+# 微信指数凭证（含敏感信息，不入库）
+config/wechat_search_config.ini
