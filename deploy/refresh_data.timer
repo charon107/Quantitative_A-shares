@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily stock data refresh from Hugging Face
+Requires=refresh_data.service
+
+[Timer]
+# 北京时间 09:00 = UTC 01:00（假设服务器未设置时区，则需要根据实际调整）
+# 使用 OnCalendar 指定每日 01:00 UTC 触发
+OnCalendar=*-*-* 01:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,16 @@
+[Unit]
+Description=A股股价数据可视化看板
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/wechatnum/Project/wechatnum/WechatNum
+Environment="HF_TOKEN=${HF_TOKEN}"
+ExecStart=/usr/bin/env uv run streamlit run src/visualization/dashboard.py --server.port 8501
+Restart=on-failure
+RestartSec=10s
+
+[Install]
+WantedBy=multi-user.target
