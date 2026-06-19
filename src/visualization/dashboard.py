@@ -111,7 +111,7 @@ def tab_market_overview():
             template="plotly_white",
             height=400,
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, config={"responsive": True})
     else:
         st.info("等权指数数据不足")
 
@@ -140,7 +140,7 @@ def tab_market_overview():
             template="plotly_white",
             height=400,
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, config={"responsive": True})
     else:
         st.info("涨停/跌停数据不足")
 
@@ -232,7 +232,7 @@ def tab_data_status():
 
     with col2:
         latest_date = df_latest["date"].max()
-        st.metric("数据日期", latest_date)
+        st.metric("数据日期", str(latest_date)[:10])
 
     with col3:
         # 计算"距今"的时间差
