@@ -4,7 +4,14 @@ A股股价数据可视化看板 — Streamlit 应用
 4 个 tabs：大盘概览、个股查询、排行榜、数据状态
 """
 import os
+import sys
 from pathlib import Path
+
+# 修复 Streamlit 的导入问题
+project_root = Path(__file__).parent.parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
