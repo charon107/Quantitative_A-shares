@@ -7,6 +7,19 @@ import baostock as bs
 import pandas as pd
 from tqdm import tqdm
 
+# pandas>=2.0 移除了 DataFrame.append，而 baostock 0.9.2 的 resultset.get_data()
+# 仍在调用它（CI 用 `uv sync --frozen` 会重装原版 baostock，故必须在项目侧兜底）。
+# 这里补一个等价垫片，把 append 转成 concat，保证拉取股价/股票列表不报 AttributeError。
+if not hasattr(pd.DataFrame, "append"):
+    def _df_append(self, other, ignore_index=False, verify_integrity=False, sort=False):
+        others = other if isinstance(other, (list, tuple)) else [other]
+        frames = [self] + [
+            o if isinstance(o, pd.DataFrame) else pd.DataFrame(o) for o in others
+        ]
+        return pd.concat(frames, ignore_index=ignore_index)
+
+    pd.DataFrame.append = _df_append
+
 # =========================
 # 配置区
 # =========================
