@@ -213,6 +213,40 @@ def limit_up_down_series(
     return result
 
 
+def load_stock_kline(
+    code: str,
+    data_dir: str,
+    kline_subdir: str = "kline_fq",
+) -> pd.DataFrame:
+    """
+    加载单只股票的完整 K线数据（按日期升序排列）。
+
+    参数：
+        code: 股票代码（如 "sh.601988"）
+        data_dir: 数据根目录
+        kline_subdir: K线子目录
+
+    返回：
+        DataFrame，包含 date/open/high/low/close/volume/amount/turn/pctChg 等列，
+        按 date 升序排列。
+
+    异常：
+        FileNotFoundError: 该股票的 parquet 文件不存在
+        KeyError: 文件存在但内容为空
+    """
+    kline_dir = Path(data_dir) / kline_subdir
+    parquet_file = kline_dir / f"{code}.parquet"
+
+    if not parquet_file.exists():
+        raise FileNotFoundError(f"Cannot find parquet file for {code}")
+
+    df = pd.read_parquet(parquet_file)
+    if df.empty:
+        raise KeyError(f"No data for {code}")
+
+    return df.sort_values("date").reset_index(drop=True)
+
+
 def rolling_volatility(
     code: str,
     data_dir: str,
@@ -232,22 +266,12 @@ def rolling_volatility(
         Series，index 为日期，values 为年化波动率（百分数，如 0.25 表示 25%）
         数据不足 window 的行返回 NaN。
     """
-    kline_dir = Path(data_dir) / kline_subdir
-    parquet_file = kline_dir / f"{code}.parquet"
-
-    if not parquet_file.exists():
-        raise FileNotFoundError(f"Cannot find parquet file for {code}")
-
-    df = pd.read_parquet(parquet_file)
-    if df.empty:
-        raise KeyError(f"No data for {code}")
-
-    df = df.sort_values("date").reset_index(drop=True)
+    df = load_stock_kline(code, data_dir, kline_subdir)
 
     # 计算日收益率
     df["daily_return"] = df["close"].pct_change()
 
-    # 计算滚动标准差 * sqrt(252) 得年化波动率
+    # 计算滚动标准差 * sqrt(252) 得年化波动率（252 为年化交易日数）
     volatility = df["daily_return"].rolling(window=window).std() * np.sqrt(252)
 
     return volatility

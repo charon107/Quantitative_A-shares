@@ -26,6 +26,7 @@ FACTOR_LOOKBACK_DAYS = 30
 DATA_DIR = os.path.join(BASE_DIR, "kline_fq")        # 前复权日线 parquet
 FACTOR_DIR = os.path.join(BASE_DIR, "adj_factor")    # 复权因子 parquet
 STATE_PATH = os.path.join(BASE_DIR, "state.json")
+NAME_MAP_PATH = os.path.join(BASE_DIR, "code_name_map.parquet")  # 代码->公司名称映射（供看板显示）
 
 
 def ensure_dirs():
@@ -118,6 +119,53 @@ def get_stock_list() -> pd.DataFrame:
         raise RuntimeError("query_all_stock returned empty DataFrame.")
 
     return filter_mainboard(df2)
+
+
+def save_name_map(stock_df: pd.DataFrame):
+    """
+    保存代码->公司名称映射到 parquet，供可视化看板显示公司名称。
+
+    数据随 股价数据_parquet_fq/ 目录一起同步到 Hugging Face，
+    看板只读本地文件，无需自己联网调 baostock。
+
+    query_stock_basic 返回 code_name 列；query_all_stock 兜底返回 code_name。
+    若两者都没有名称列，则跳过（看板回退到只显示代码）。
+    """
+    name_col = None
+    for candidate in ["code_name", "证券简称", "name"]:
+        if candidate in stock_df.columns:
+            name_col = candidate
+            break
+
+    if name_col is None:
+        print("[save_name_map] 警告：股票列表无名称列，跳过名称映射保存")
+        return
+
+    name_map = (
+        stock_df[["code", name_col]]
+        .rename(columns={name_col: "code_name"})
+        .dropna()
+        .drop_duplicates("code")
+    )
+    name_map.to_parquet(NAME_MAP_PATH, index=False)
+    print(f"[save_name_map] 已保存 {len(name_map)} 条代码->名称映射: {NAME_MAP_PATH}")
+
+
+def build_name_map_only():
+    """
+    仅生成代码->名称映射文件（不拉取K线），用于快速初始化看板名称显示。
+
+    用法：python src/data_collection/stock_price.py name-map
+    """
+    ensure_dirs()
+    lg = bs.login()
+    if lg.error_code != "0":
+        raise RuntimeError(f"baostock login failed: {lg.error_msg}")
+    try:
+        stock_df = get_stock_list()
+        save_name_map(stock_df)
+    finally:
+        bs.logout()
 
 
 def fetch_kline_fq(code: str, start_date: str, end_date: str = "") -> pd.DataFrame:
@@ -321,6 +369,9 @@ def main():
         stock_df = get_stock_list()
         codes = stock_df["code"].tolist()
 
+        # 顺便刷新代码->名称映射，供看板显示公司名称（随 HF 同步）
+        save_name_map(stock_df)
+
         factor_check_start = (datetime.today() - timedelta(days=FACTOR_LOOKBACK_DAYS)).strftime("%Y-%m-%d")
         if factor_check_start < START_DATE:
             factor_check_start = START_DATE
@@ -376,4 +427,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == "name-map":
+        # 轻量模式：只生成代码->名称映射，不拉取K线
+        build_name_map_only()
+    else:
+        main()

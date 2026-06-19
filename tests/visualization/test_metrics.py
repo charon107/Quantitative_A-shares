@@ -9,12 +9,66 @@ import pandas as pd
 import numpy as np
 from src.visualization.metrics import (
     load_all_latest_day,
+    load_stock_kline,
     market_breadth,
     equal_weighted_index,
     limit_up_down_series,
     rolling_volatility,
     top_movers,
 )
+
+
+class TestLoadStockKline:
+    """测试 load_stock_kline() — 加载单只股票完整 K线"""
+
+    def test_normal_case(self, tmp_path):
+        """正常：加载并按日期排序"""
+        kline_dir = tmp_path / "kline_fq"
+        kline_dir.mkdir(exist_ok=True)
+
+        # 故意打乱顺序写入
+        df = pd.DataFrame({
+            "date": ["2025-06-19", "2025-06-17", "2025-06-18"],
+            "code": ["sh.601988"] * 3,
+            "open": [10.4, 10.0, 10.2],
+            "high": [10.9, 10.5, 10.7],
+            "low": [10.3, 9.9, 10.1],
+            "close": [10.6, 10.2, 10.4],
+            "volume": [1400000, 1000000, 1200000],
+            "amount": [1.4e7, 1e7, 1.2e7],
+            "turn": [0.014, 0.01, 0.012],
+            "pctChg": [0.9, 0.5, 0.8],
+        })
+        df.to_parquet(kline_dir / "sh.601988.parquet")
+
+        result = load_stock_kline("sh.601988", str(tmp_path))
+
+        # 应该按日期升序排列
+        assert len(result) == 3
+        assert list(result["date"]) == ["2025-06-17", "2025-06-18", "2025-06-19"]
+        assert result["close"].iloc[-1] == 10.6
+        # OHLCV 列齐全
+        for col in ["open", "high", "low", "close", "volume"]:
+            assert col in result.columns
+
+    def test_nonexistent_code(self, tmp_path):
+        """边界：代码不存在抛 FileNotFoundError"""
+        kline_dir = tmp_path / "kline_fq"
+        kline_dir.mkdir(exist_ok=True)
+
+        with pytest.raises(FileNotFoundError):
+            load_stock_kline("sh.999999", str(tmp_path))
+
+    def test_empty_parquet(self, tmp_path):
+        """边界：文件存在但为空抛 KeyError"""
+        kline_dir = tmp_path / "kline_fq"
+        kline_dir.mkdir(exist_ok=True)
+
+        empty_df = pd.DataFrame(columns=["date", "code", "close"])
+        empty_df.to_parquet(kline_dir / "sh.601988.parquet")
+
+        with pytest.raises(KeyError):
+            load_stock_kline("sh.601988", str(tmp_path))
 
 
 class TestLoadAllLatestDay:
