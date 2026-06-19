@@ -2,8 +2,10 @@
 沪深主板微信指数/
 股价数据_parquet_fq/
 parquet_A股_2007-2024_Q4/
+parquet_A股_2007-2024_Q4.zip
 网格搜索涨停策略/bs_cache/
 网格搜索最严格涨停/bs_cache/
+*.zip
 
 # Python
 .venv/

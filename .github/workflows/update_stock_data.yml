@@ -1,0 +1,33 @@
+name: Daily Stock Data Update
+
+on:
+  schedule:
+    - cron: "30 23 * * 1-5"  # UTC 23:30 = 北京时间次日 07:30（工作日）
+  workflow_dispatch:  # 手动触发，用于测试
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120  # 覆盖冷启动全量拉取场景（~80分钟）
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v3
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Download existing data from HF
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: uv run python -m src.data_collection.hf_sync download
+
+      - name: Run incremental stock data update
+        run: uv run python src/data_collection/stock_price.py
+
+      - name: Upload updated data to HF
+        if: always()  # 即使上一步报错也尽量上传已更新部分
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: uv run python -m src.data_collection.hf_sync upload

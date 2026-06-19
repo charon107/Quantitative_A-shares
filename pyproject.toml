@@ -13,4 +13,5 @@ dependencies = [
     "matplotlib",
     "openpyxl",
     "pyarrow",
+    "huggingface-hub",
 ]
