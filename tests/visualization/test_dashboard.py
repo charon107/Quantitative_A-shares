@@ -31,6 +31,57 @@ class TestFormatStockLabel:
         assert result == "sh.999999"
 
 
+# ========== filter_stocks（纯函数：代码/名称/模糊搜索） ==========
+class TestFilterStocks:
+    CODES = ["sh.600015", "sh.600016", "sz.000001"]
+    NAME_MAP = {
+        "sh.600015": "华夏银行",
+        "sh.600016": "民生银行",
+        "sz.000001": "平安银行",
+    }
+
+    def test_by_company_name(self):
+        """按公司名称子串命中"""
+        result = dashboard.filter_stocks(self.CODES, self.NAME_MAP, "华夏")
+        assert result == ["sh.600015"]
+
+    def test_by_code_number(self):
+        """按代码数字片段命中（不含市场前缀）"""
+        result = dashboard.filter_stocks(self.CODES, self.NAME_MAP, "600015")
+        assert result == ["sh.600015"]
+
+    def test_by_code_prefix_multi(self):
+        """按代码前缀模糊命中多只"""
+        result = dashboard.filter_stocks(self.CODES, self.NAME_MAP, "sh.600")
+        assert result == ["sh.600015", "sh.600016"]
+
+    def test_case_insensitive(self):
+        """大小写不敏感"""
+        result = dashboard.filter_stocks(self.CODES, self.NAME_MAP, "SH.600015")
+        assert result == ["sh.600015"]
+
+    def test_fuzzy_name_substring(self):
+        """名称模糊子串命中多只（'银行' 命中全部）"""
+        result = dashboard.filter_stocks(self.CODES, self.NAME_MAP, "银行")
+        assert result == ["sh.600015", "sh.600016", "sz.000001"]
+
+    def test_empty_query_returns_all(self):
+        """空 query 返回全部"""
+        assert dashboard.filter_stocks(self.CODES, self.NAME_MAP, "") == self.CODES
+        assert dashboard.filter_stocks(self.CODES, self.NAME_MAP, "   ") == self.CODES
+
+    def test_no_match_returns_empty(self):
+        """无命中返回空列表"""
+        assert dashboard.filter_stocks(self.CODES, self.NAME_MAP, "不存在") == []
+
+    def test_missing_name_falls_back_to_code(self):
+        """name_map 缺失该代码时只按代码匹配、不报错"""
+        result = dashboard.filter_stocks(["sh.600015"], {}, "600015")
+        assert result == ["sh.600015"]
+        # 名称搜索在无映射时不命中，但也不抛异常
+        assert dashboard.filter_stocks(["sh.600015"], {}, "华夏") == []
+
+
 # ========== load_name_map（读 parquet + 容错） ==========
 class TestLoadNameMap:
     def test_normal(self, tmp_path, monkeypatch):

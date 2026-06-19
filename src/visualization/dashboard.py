@@ -17,6 +17,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime
+from streamlit_searchbox import st_searchbox
 
 from src.visualization.metrics import (
     load_all_latest_day,
@@ -32,6 +33,12 @@ from src.visualization.metrics import (
 COLOR_UP = "#16a764"     # 上涨绿
 COLOR_DOWN = "#cc3a21"   # 下跌红
 COLOR_VOLUME = "#dbeafe" # 成交量副图浅蓝
+
+# 搜索框单次最多展示的候选数量（避免下拉过长）
+SEARCH_MAX_RESULTS = 50
+
+# 排行榜榜单基数（表内关键词筛选在此范围内进行）
+RANK_TOP_N = 50
 
 
 # ========== 配置 ==========
@@ -96,6 +103,22 @@ def format_stock_label(code: str, name_map: dict) -> str:
     """格式化股票标签：'公司名称 (代码)'，无名称时只显示代码。"""
     name = name_map.get(code, "")
     return f"{name} ({code})" if name else code
+
+
+def filter_stocks(codes, name_map: dict, query: str) -> list:
+    """
+    按代码或公司名称模糊过滤股票（大小写不敏感的子串匹配）。
+
+    同时支持：公司名称搜索、股票代码搜索、模糊（子串）搜索。
+    query 为空时返回全部代码。
+    """
+    q = query.strip().lower()
+    if not q:
+        return list(codes)
+    return [
+        code for code in codes
+        if q in code.lower() or q in name_map.get(code, "").lower()
+    ]
 
 
 # ========== Tab 1: 大盘概览 ==========
@@ -189,13 +212,21 @@ def tab_stock_query():
 
     name_map = load_name_map()
     stock_list = sorted(df_latest["code"].unique())
-    selected_code = st.selectbox(
-        "选择股票（输入代码或公司名称搜索）",
-        stock_list,
-        format_func=lambda x: format_stock_label(x, name_map),
+
+    def search_stocks(term: str):
+        """搜索框回调：随输入实时返回 (显示标签, 代码) 候选列表。"""
+        matches = filter_stocks(stock_list, name_map, term)
+        return [(format_stock_label(c, name_map), c) for c in matches[:SEARCH_MAX_RESULTS]]
+
+    selected_code = st_searchbox(
+        search_stocks,
+        placeholder="输入代码或公司名称，如：600015 / 华夏 / sh.600",
+        label="搜索股票（支持代码、公司名称、模糊匹配）",
+        key="stock_searchbox",
     )
 
     if not selected_code:
+        st.info("请在上方输入关键词并从候选中选择股票")
         return
 
     st.info(f"已选择：{format_stock_label(selected_code, name_map)}")
@@ -299,33 +330,55 @@ def tab_rankings():
     )
 
     if rank_type == "涨幅榜":
-        top = top_movers(df_latest, n=10, metric="pctChg", ascending=False)
-        st.subheader("涨幅 Top10")
+        top = top_movers(df_latest, n=RANK_TOP_N, metric="pctChg", ascending=False)
+        st.subheader(f"涨幅 Top{RANK_TOP_N}")
     elif rank_type == "跌幅榜":
-        top = top_movers(df_latest, n=10, metric="pctChg", ascending=True)
-        st.subheader("跌幅 Top10")
+        top = top_movers(df_latest, n=RANK_TOP_N, metric="pctChg", ascending=True)
+        st.subheader(f"跌幅 Top{RANK_TOP_N}")
     elif rank_type == "成交额":
-        top = top_movers(df_latest, n=10, metric="amount", ascending=False)
-        st.subheader("成交额 Top10")
+        top = top_movers(df_latest, n=RANK_TOP_N, metric="amount", ascending=False)
+        st.subheader(f"成交额 Top{RANK_TOP_N}")
     else:  # 换手率
-        top = top_movers(df_latest, n=10, metric="turn", ascending=False)
-        st.subheader("换手率 Top10")
+        top = top_movers(df_latest, n=RANK_TOP_N, metric="turn", ascending=False)
+        st.subheader(f"换手率 Top{RANK_TOP_N}")
 
-    if not top.empty:
-        name_map = load_name_map()
-        display_cols = ["code", "pctChg", "amount", "turn"]
-        display_df = top[[c for c in display_cols if c in top.columns]].copy()
-        # 在代码列旁插入公司名称列
-        display_df.insert(1, "名称", display_df["code"].map(lambda c: name_map.get(c, "")))
-        display_df = display_df.rename(columns={
-            "code": "代码",
-            "pctChg": "涨跌幅(%)",
-            "amount": "成交额",
-            "turn": "换手率(%)",
-        })
-        st.dataframe(display_df, use_container_width=True, hide_index=True)
-    else:
+    if top.empty:
         st.info("无排行榜数据")
+        return
+
+    name_map = load_name_map()
+    display_cols = ["code", "close", "pctChg", "amount", "turn"]
+    display_df = top[[c for c in display_cols if c in top.columns]].copy()
+    # 最新价保留 2 位小数（遵循 DESIGN.md 价格精度约定）
+    if "close" in display_df.columns:
+        display_df["close"] = display_df["close"].round(2)
+    # 在代码列旁插入公司名称列
+    display_df.insert(1, "名称", display_df["code"].map(lambda c: name_map.get(c, "")))
+
+    # 表内关键词筛选：按代码或公司名称模糊过滤当前榜单（复用 filter_stocks）
+    rank_query = st.text_input(
+        "筛选榜单（输入代码或公司名称，支持模糊匹配）",
+        placeholder="如：银行 / 600015",
+        key="rank_filter",
+    )
+    matched_codes = set(filter_stocks(display_df["code"].tolist(), name_map, rank_query))
+    display_df = display_df[display_df["code"].isin(matched_codes)]
+
+    if display_df.empty:
+        st.info("当前榜单中没有匹配的股票")
+        return
+
+    if rank_query.strip():
+        st.caption(f"榜单内匹配到 {len(display_df)} 只股票")
+
+    display_df = display_df.rename(columns={
+        "code": "代码",
+        "close": "最新价",
+        "pctChg": "涨跌幅(%)",
+        "amount": "成交额",
+        "turn": "换手率(%)",
+    })
+    st.dataframe(display_df, use_container_width=True, hide_index=True)
 
 
 # ========== Tab 4: 数据状态 ==========
@@ -397,6 +450,15 @@ def main():
     with tab4:
         tab_data_status()
 
+
+@st.cache_data(ttl=3600)
+def load_kline_cached(code):
+    from src.visualization.metrics import load_stock_kline
+    try:
+        return load_stock_kline(code, DATA_DIR)
+    except Exception:
+        import pandas as _pd
+        return _pd.DataFrame()
 
 if __name__ == "__main__":
     main()
