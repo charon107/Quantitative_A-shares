@@ -28,11 +28,22 @@ from src.visualization.metrics import (
     rolling_volatility,
     top_movers,
 )
+from src.visualization.ui_theme import (
+    COLORS,
+    MA_COLORS,
+    inject_global_css,
+    app_header,
+    badge,
+    kpi_card,
+    apply_chart_theme,
+    add_range_selector,
+    style_ranking,
+)
 
-# 颜色常量（遵循 DESIGN.md）
-COLOR_UP = "#16a764"     # 上涨绿
-COLOR_DOWN = "#cc3a21"   # 下跌红
-COLOR_VOLUME = "#dbeafe" # 成交量副图浅蓝
+# 颜色常量（单一来源见 ui_theme.COLORS / DESIGN.md，深色终端主题）
+COLOR_UP = COLORS["up"]       # 上涨绿
+COLOR_DOWN = COLORS["down"]   # 下跌红
+COLOR_VOLUME = COLORS["volume"]  # 成交量副图
 
 # 搜索框单次最多展示的候选数量（避免下拉过长）
 SEARCH_MAX_RESULTS = 50
@@ -47,7 +58,7 @@ st.set_page_config(
     page_title="A股股价看板",
     page_icon="📈",
     layout="wide",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",
 )
 
 # ========== 缓存函数 ==========
@@ -121,80 +132,213 @@ def filter_stocks(codes, name_map: dict, query: str) -> list:
     ]
 
 
+# 起始范围选项 → start_date 映射
+_RANGE_OPTIONS = ["近3月", "近6月", "今年至今", "全部"]
+
+
+def _start_date_from_option(option: str) -> str:
+    """把起始范围选项转换为 YYYY-MM-DD 起始日期。"""
+    now = pd.Timestamp.now()
+    return {
+        "近3月": (now - pd.Timedelta(days=90)).strftime("%Y-%m-%d"),
+        "近6月": (now - pd.Timedelta(days=180)).strftime("%Y-%m-%d"),
+        "今年至今": f"{now.year}-01-01",
+        "全部": "2007-01-01",
+    }.get(option, f"{now.year}-01-01")
+
+
+def _nontrading_breaks(dates: pd.Series) -> list:
+    """计算需要在 K线 x 轴隐藏的非交易日（周末 + 节假日），消除蜡烛间空档。"""
+    if dates.empty:
+        return [dict(bounds=["sat", "mon"])]
+    full_bdays = pd.bdate_range(dates.min(), dates.max())  # 工作日全集
+    present = pd.DatetimeIndex(dates.unique())
+    holidays = full_bdays.difference(present)              # 工作日中缺失的 = 节假日/停牌
+    breaks = [dict(bounds=["sat", "mon"])]                 # 周末
+    if len(holidays) > 0:
+        breaks.append(dict(values=holidays))
+    return breaks
+
+
+def build_kline_fig(
+    df: pd.DataFrame,
+    *,
+    n: int | None = None,
+    height: int = 600,
+    ma_periods=(5, 10, 20, 60),
+):
+    """
+    构造专业 K线（蜡烛 + 均线 + 成交量）深色主题 Figure。供个股查询与排行榜预览复用。
+
+    参数：
+        df: 完整 K线 DataFrame（含 date/open/high/low/close/volume，可选 pctChg）。
+            均线在完整序列上计算后再裁剪，避免窗口开头缺失。
+        n: 仅展示最近 n 个交易日（None=全部）。
+        ma_periods: 叠加的均线周期。
+    """
+    d = df.copy()
+    d["date"] = pd.to_datetime(d["date"])
+    # 在完整序列上算均线（价格 + 量），再裁剪显示窗口
+    for p in ma_periods:
+        d[f"MA{p}"] = d["close"].rolling(p).mean()
+    d["VMA5"] = d["volume"].rolling(5).mean()
+    view = d.tail(n) if n else d
+
+    fig = make_subplots(
+        rows=2, cols=1, shared_xaxes=True,
+        vertical_spacing=0.03, row_heights=[0.74, 0.26],
+    )
+
+    # 价格均线（置于蜡烛之下先画，图例可点击开关）
+    for p in ma_periods:
+        col = f"MA{p}"
+        if view[col].notna().any():
+            fig.add_trace(
+                go.Scatter(
+                    x=view["date"], y=view[col],
+                    mode="lines", name=f"MA{p}",
+                    line=dict(color=MA_COLORS.get(p, COLORS["text_secondary"]), width=1.2),
+                    hovertemplate=f"MA{p} %{{y:.2f}}<extra></extra>",
+                ),
+                row=1, col=1,
+            )
+
+    # 蜡烛图（涨绿/跌红；A股惯例阳线空心、阴线实心，形状冗余助色盲辨识）
+    fig.add_trace(
+        go.Candlestick(
+            x=view["date"],
+            open=view["open"], high=view["high"],
+            low=view["low"], close=view["close"],
+            increasing=dict(line=dict(color=COLOR_UP), fillcolor="rgba(0,0,0,0)"),
+            decreasing=dict(line=dict(color=COLOR_DOWN), fillcolor=COLOR_DOWN),
+            name="K线", showlegend=False,
+        ),
+        row=1, col=1,
+    )
+
+    # 成交量（万股，半透明降权，从属于价格）
+    vol_wan = view["volume"] / 1e4
+    vol_colors = [
+        COLOR_UP if c >= o else COLOR_DOWN
+        for o, c in zip(view["open"], view["close"])
+    ]
+    fig.add_trace(
+        go.Bar(
+            x=view["date"], y=vol_wan,
+            marker_color=vol_colors, marker_line_width=0, opacity=0.5,
+            name="成交量", showlegend=False,
+            hovertemplate="量 %{y:.0f} 万股<extra></extra>",
+        ),
+        row=2, col=1,
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=view["date"], y=view["VMA5"] / 1e4,
+            mode="lines", name="量MA5",
+            line=dict(color=COLORS["text_secondary"], width=1),
+            showlegend=False, hovertemplate="量MA5 %{y:.0f} 万股<extra></extra>",
+        ),
+        row=2, col=1,
+    )
+
+    # 最新价参考线 + 右侧价签（按当日涨跌着色）
+    last = view.iloc[-1]
+    last_pct = float(last.get("pctChg", 0) or 0)
+    tag_color = COLOR_UP if last_pct > 0 else COLOR_DOWN if last_pct < 0 else COLORS["text_secondary"]
+    fig.add_hline(
+        y=float(last["close"]), line=dict(color=tag_color, width=1, dash="dash"),
+        annotation_text=f"{last['close']:.2f}", annotation_position="top right",
+        annotation_font=dict(color="#020617", size=12, family="Fira Code, monospace"),
+        annotation_bgcolor=tag_color, annotation_bordercolor=tag_color,
+        row=1, col=1,
+    )
+
+    fig.update_layout(xaxis_rangeslider_visible=False)
+    fig = apply_chart_theme(fig, height=height, show_legend=True)
+    # 去除非交易日空档；价格/成交量轴标题与右置
+    breaks = _nontrading_breaks(view["date"])
+    fig.update_xaxes(rangebreaks=breaks)
+    fig.update_yaxes(title_text="价格", side="right", row=1, col=1)
+    fig.update_yaxes(title_text="成交量(万股)", side="right", row=2, col=1)
+    return fig
+
+
 # ========== Tab 1: 大盘概览 ==========
 def tab_market_overview():
     """大盘概览 tab：市场宽度、等权指数、涨停/跌停走势"""
-    st.header("📊 大盘概览")
+    st.header("大盘概览")
 
     df_latest = load_latest_day()
 
     if df_latest.empty:
-        st.error("无法加载市场数据。请检查数据目录。")
+        st.error("无法加载市场数据。请检查数据目录或点击侧边栏「刷新数据」。")
         return
 
-    # 市场宽度指标（3 个卡片）
+    # 市场宽度指标（4 个 KPI 卡片）
     st.subheader("市场宽度")
     breadth = market_breadth(df_latest)
 
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("上涨", breadth["up"], delta=None, delta_color="off")
+        kpi_card("上涨家数", f"{breadth['up']:,}", tone="up")
     with col2:
-        st.metric("下跌", breadth["down"], delta=None, delta_color="off")
+        kpi_card("下跌家数", f"{breadth['down']:,}", tone="down")
     with col3:
-        st.metric("平盘", breadth["flat"], delta=None, delta_color="off")
+        kpi_card("平盘家数", f"{breadth['flat']:,}", tone="neutral")
     with col4:
-        ratio_text = f"{breadth['ratio']:.2f}" if breadth['ratio'] != float('inf') else "∞"
-        st.metric("涨跌比", ratio_text, delta=None, delta_color="off")
+        ratio_text = f"{breadth['ratio']:.2f}" if breadth["ratio"] != float("inf") else "∞"
+        kpi_card("涨跌比", ratio_text, tone="primary")
+
+    # 起始范围选择（控制等权指数与涨停/跌停的起点）
+    st.write("")
+    range_option = st.selectbox(
+        "起始范围", _RANGE_OPTIONS, index=2, key="overview_range"
+    )
+    start_date = _start_date_from_option(range_option)
 
     # 等权指数走势图
     st.subheader("等权指数走势")
-    index_series = load_equal_weighted_index()
+    with st.spinner("计算等权指数中…"):
+        index_series = load_equal_weighted_index(start_date=start_date)
     if not index_series.empty:
         fig = go.Figure()
         fig.add_trace(go.Scatter(
-            x=index_series.index,
+            x=pd.to_datetime(index_series.index),
             y=index_series.values * 100,  # 转换为百分比显示
             mode="lines",
             name="等权指数",
-            line=dict(color="#16a764", width=2),
+            line=dict(color=COLORS["accent"], width=2),
+            fill="tozeroy",
+            fillcolor="rgba(34,197,94,0.08)",
         ))
-        fig.update_layout(
-            xaxis_title="日期",
-            yaxis_title="累计收益率 (%)",
-            template="plotly_white",
-            height=400,
-        )
-        st.plotly_chart(fig, use_container_width=True, config={"responsive": True})
+        fig.update_yaxes(title_text="累计收益率 (%)")
+        fig = apply_chart_theme(fig, height=400)
+        fig = add_range_selector(fig)
+        st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
     else:
         st.info("等权指数数据不足")
 
     # 涨停/跌停走势
-    st.subheader("涨停/跌停统计")
-    limit_df = load_limit_up_down()
+    st.subheader("涨停 / 跌停统计")
+    with st.spinner("统计涨跌停中…"):
+        limit_df = load_limit_up_down()
     if not limit_df.empty:
+        x_dates = pd.to_datetime(limit_df["date"])
         fig = go.Figure()
         fig.add_trace(go.Scatter(
-            x=limit_df["date"],
-            y=limit_df["limit_up"],
-            mode="lines+markers",
-            name="涨停家数",
-            line=dict(color="#f59e0b", width=2),
+            x=x_dates, y=limit_df["limit_up"],
+            mode="lines", name="涨停家数",
+            line=dict(color=COLORS["warn"], width=2),
         ))
         fig.add_trace(go.Scatter(
-            x=limit_df["date"],
-            y=limit_df["limit_down"],
-            mode="lines+markers",
-            name="跌停家数",
-            line=dict(color="#3b82f6", width=2),
+            x=x_dates, y=limit_df["limit_down"],
+            mode="lines", name="跌停家数",
+            line=dict(color=COLORS["info"], width=2),
         ))
-        fig.update_layout(
-            xaxis_title="日期",
-            yaxis_title="家数",
-            template="plotly_white",
-            height=400,
-        )
-        st.plotly_chart(fig, use_container_width=True, config={"responsive": True})
+        fig.update_yaxes(title_text="家数")
+        fig = apply_chart_theme(fig, height=400, show_legend=True)
+        fig = add_range_selector(fig)
+        st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
     else:
         st.info("涨停/跌停数据不足")
 
@@ -202,7 +346,7 @@ def tab_market_overview():
 # ========== Tab 2: 个股查询 ==========
 def tab_stock_query():
     """个股查询 tab：搜索、K线、波动率"""
-    st.header("📈 个股查询")
+    st.header("个股查询")
 
     # 构建股票代码列表
     df_latest = load_latest_day()
@@ -229,69 +373,44 @@ def tab_stock_query():
         st.info("请在上方输入关键词并从候选中选择股票")
         return
 
-    st.info(f"已选择：{format_stock_label(selected_code, name_map)}")
+    st.markdown(
+        badge(f"已选择 · {format_stock_label(selected_code, name_map)}", "ok"),
+        unsafe_allow_html=True,
+    )
 
-    df_k = load_kline_cached(selected_code)
+    with st.spinner("加载 K线数据中…"):
+        df_k = load_kline_cached(selected_code)
     if df_k.empty:
         st.warning("无法加载该股票的 K线数据")
         return
 
-    # 显示范围选择
+    # 显示范围选择（加 key 以跨重跑持久化）
     range_map = {"最近 60 日": 60, "最近 120 日": 120, "最近 250 日": 250, "全部": None}
     range_option = st.radio(
-        "显示范围", list(range_map.keys()), horizontal=True, index=1
+        "显示范围", list(range_map.keys()), horizontal=True, index=1, key="kline_range"
     )
     n = range_map[range_option]
-    df_view = df_k.tail(n) if n else df_k
 
     # 股价指标卡片（基于最新一日）
     latest = df_k.iloc[-1]
+    pct = float(latest.get("pctChg", 0) or 0)
+    pct_tone = "up" if pct > 0 else "down" if pct < 0 else "neutral"
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("最新价", f"{latest['close']:.2f}", delta=f"{latest.get('pctChg', 0):.2f}%")
+        kpi_card(
+            "最新价", f"{latest['close']:.2f}",
+            delta=f"{pct:+.2f}%", delta_tone=pct_tone, tone="neutral",
+        )
     with col2:
-        st.metric("最高 / 最低", f"{latest['high']:.2f} / {latest['low']:.2f}")
+        kpi_card("最高 / 最低", f"{latest['high']:.2f} / {latest['low']:.2f}", tone="neutral")
     with col3:
-        st.metric("成交额", f"{latest.get('amount', 0) / 1e8:.2f} 亿")
+        kpi_card("成交额", f"{latest.get('amount', 0) / 1e8:.2f} 亿", tone="neutral")
     with col4:
-        st.metric("换手率", f"{latest.get('turn', 0):.2f}%")
+        kpi_card("换手率", f"{latest.get('turn', 0):.2f}%", tone="neutral")
 
-    # K线蜡烛图 + 成交量副图
-    fig = make_subplots(
-        rows=2, cols=1, shared_xaxes=True,
-        vertical_spacing=0.03, row_heights=[0.7, 0.3],
-        subplot_titles=("K线（前复权）", "成交量"),
-    )
-    fig.add_trace(
-        go.Candlestick(
-            x=df_view["date"],
-            open=df_view["open"], high=df_view["high"],
-            low=df_view["low"], close=df_view["close"],
-            increasing_line_color=COLOR_UP,
-            decreasing_line_color=COLOR_DOWN,
-            name="K线",
-        ),
-        row=1, col=1,
-    )
-    # 成交量柱：当日收 >= 开为涨（绿），否则跌（红）
-    vol_colors = [
-        COLOR_UP if c >= o else COLOR_DOWN
-        for o, c in zip(df_view["open"], df_view["close"])
-    ]
-    fig.add_trace(
-        go.Bar(
-            x=df_view["date"], y=df_view["volume"],
-            marker_color=vol_colors, name="成交量",
-        ),
-        row=2, col=1,
-    )
-    fig.update_layout(
-        template="plotly_white",
-        height=600,
-        xaxis_rangeslider_visible=False,
-        showlegend=False,
-    )
-    st.plotly_chart(fig, use_container_width=True)
+    # K线蜡烛图 + 均线 + 成交量副图
+    fig = build_kline_fig(df_k, n=n, height=600)
+    st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
 
     # 20 日滚动年化波动率曲线
     try:
@@ -300,16 +419,14 @@ def tab_stock_query():
         date_view = df_k["date"].tail(n) if n else df_k["date"]
         fig_vol = go.Figure()
         fig_vol.add_trace(go.Scatter(
-            x=date_view, y=vol_view * 100,
+            x=pd.to_datetime(date_view), y=vol_view * 100,
             mode="lines", name="20日年化波动率",
-            line=dict(color="#6d9eeb", width=2),
+            line=dict(color=COLORS["info"], width=2),
+            fill="tozeroy", fillcolor="rgba(59,130,246,0.08)",
         ))
-        fig_vol.update_layout(
-            title="20 日滚动年化波动率",
-            xaxis_title="日期", yaxis_title="波动率 (%)",
-            template="plotly_white", height=300,
-        )
-        st.plotly_chart(fig_vol, use_container_width=True)
+        fig_vol.update_yaxes(title_text="波动率 (%)")
+        fig_vol = apply_chart_theme(fig_vol, height=300)
+        st.plotly_chart(fig_vol, width="stretch", config={"displayModeBar": False})
     except Exception as e:
         st.warning(f"无法加载波动率：{e}")
 
@@ -317,7 +434,7 @@ def tab_stock_query():
 # ========== Tab 3: 排行榜 ==========
 def tab_rankings():
     """排行榜 tab：涨幅/跌幅/成交额"""
-    st.header("🏆 排行榜")
+    st.header("排行榜")
 
     df_latest = load_latest_day()
     if df_latest.empty:
@@ -377,14 +494,38 @@ def tab_rankings():
         "pctChg": "涨跌幅(%)",
         "amount": "成交额",
         "turn": "换手率(%)",
-    })
-    st.dataframe(display_df, use_container_width=True, hide_index=True)
+    }).reset_index(drop=True)
+
+    st.caption("点击任意行查看该股 K线速览")
+    event = st.dataframe(
+        style_ranking(display_df),
+        width="stretch",
+        hide_index=True,
+        on_select="rerun",
+        selection_mode="single-row",
+        key="rank_table",
+    )
+
+    # 行选择 → 内联渲染该股 K线（避免 Streamlit 无法程序化切 tab）
+    sel_rows = []
+    if event is not None and getattr(event, "selection", None):
+        sel_rows = event.selection.get("rows", []) if isinstance(event.selection, dict) else event.selection.rows
+    if sel_rows:
+        sel_code = str(display_df.iloc[sel_rows[0]]["代码"])
+        with st.expander(f"K线速览 · {format_stock_label(sel_code, name_map)}", expanded=True):
+            with st.spinner("加载 K线中…"):
+                df_k = load_kline_cached(sel_code)
+            if df_k.empty:
+                st.warning("无法加载该股票的 K线数据")
+            else:
+                fig = build_kline_fig(df_k, n=120, height=420)
+                st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
 
 
 # ========== Tab 4: 数据状态 ==========
 def tab_data_status():
     """数据新鲜度、覆盖范围"""
-    st.header("📋 数据状态")
+    st.header("数据状态")
 
     df_latest = load_latest_day()
 
@@ -392,35 +533,26 @@ def tab_data_status():
         st.warning("无可用数据")
         return
 
-    # 数据统计
+    latest_date, days_ago = data_freshness(df_latest)
+
+    # 数据统计（KPI 卡片）
     col1, col2, col3 = st.columns(3)
-
     with col1:
-        st.metric("覆盖股票数", len(df_latest))
-
+        kpi_card("覆盖股票数", f"{len(df_latest):,}", tone="primary")
     with col2:
-        latest_date = df_latest["date"].max()
-        st.metric("数据日期", str(latest_date)[:10])
-
+        kpi_card("数据日期", latest_date, tone="neutral")
     with col3:
-        # 计算"距今"的时间差
-        try:
-            latest_dt = pd.to_datetime(latest_date)
-            now = pd.Timestamp.now()
-            days_ago = (now - latest_dt).days
-            st.metric("距今", f"{days_ago} 天前")
-        except:
-            st.metric("距今", "—")
+        if days_ago is None:
+            kpi_card("距今", "—", tone="neutral")
+        else:
+            kpi_card(
+                "距今", f"{days_ago} 天",
+                tone="down" if days_ago > 2 else "neutral",
+            )
 
     # 数据新鲜度警告
-    try:
-        latest_dt = pd.to_datetime(df_latest["date"].max())
-        now = pd.Timestamp.now()
-        days_diff = (now - latest_dt).days
-        if days_diff > 2:
-            st.warning(f"⚠️ 数据已过期（{days_diff} 天未更新），请等待数据同步")
-    except:
-        pass
+    if days_ago is not None and days_ago > 2:
+        st.warning(f"数据已过期（{days_ago} 天未更新），请等待数据同步或点击侧边栏「刷新数据」")
 
     st.divider()
     st.subheader("数据源信息")
@@ -431,9 +563,62 @@ def tab_data_status():
     """)
 
 
+# ========== 数据新鲜度（页头/侧边栏/数据状态共用） ==========
+def data_freshness(df_latest: pd.DataFrame):
+    """返回 (最新日期字符串, 距今天数)；无数据或解析失败时距今为 None。"""
+    if df_latest.empty or "date" not in df_latest.columns:
+        return "—", None
+    latest_date = str(df_latest["date"].max())[:10]
+    try:
+        days_ago = (pd.Timestamp.now() - pd.to_datetime(latest_date)).days
+    except Exception:
+        days_ago = None
+    return latest_date, days_ago
+
+
+def render_header(df_latest: pd.DataFrame) -> None:
+    """渲染页头：标题 + 副标题 + 右侧数据日期/新鲜度徽章。"""
+    latest_date, days_ago = data_freshness(df_latest)
+    if days_ago is None:
+        right = badge("暂无数据", "warn")
+    elif days_ago > 2:
+        right = badge(f"{latest_date} · {days_ago} 天前", "warn")
+    else:
+        right = badge(f"{latest_date} · {days_ago} 天前", "ok")
+    app_header(
+        "A股股价数据看板",
+        "前复权日线 · 微信指数量化研究",
+        right_html=right,
+    )
+
+
+def render_sidebar(df_latest: pd.DataFrame) -> None:
+    """常驻侧边栏：数据日期、覆盖股票数、新鲜度提示、刷新按钮。"""
+    latest_date, days_ago = data_freshness(df_latest)
+    with st.sidebar:
+        st.markdown("### 数据状态")
+        kpi_card("数据日期", latest_date, tone="neutral")
+        st.write("")
+        kpi_card("覆盖股票", f"{len(df_latest):,}", tone="primary")
+        st.write("")
+        if days_ago is not None and days_ago > 2:
+            st.markdown(badge(f"已过期 {days_ago} 天", "warn"), unsafe_allow_html=True)
+        elif days_ago is not None:
+            st.markdown(badge(f"距今 {days_ago} 天", "ok"), unsafe_allow_html=True)
+        st.divider()
+        if st.button("刷新数据", icon=":material/refresh:", width="stretch"):
+            st.cache_data.clear()
+            st.rerun()
+        st.caption("数据源：HF `Charon107/stock-price`")
+
+
 # ========== 主应用 ==========
 def main():
-    st.title("📊 A股股价数据看板")
+    inject_global_css()
+
+    df_latest = load_latest_day()
+    render_header(df_latest)
+    render_sidebar(df_latest)
 
     # 4 个 Tab
     tab1, tab2, tab3, tab4 = st.tabs(["大盘概览", "个股查询", "排行榜", "数据状态"])
