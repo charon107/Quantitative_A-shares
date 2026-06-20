@@ -1,7 +1,9 @@
 import os
 import json
+import atexit
 import hashlib
 from datetime import datetime, timedelta
+from concurrent.futures import ProcessPoolExecutor
 
 import baostock as bs
 import pandas as pd
@@ -32,6 +34,10 @@ K_FIELDS = "date,code,open,high,low,close,volume,amount,turn,pctChg"
 
 # 检查复权因子是否变化：每次运行回看最近 N 天（越大越保险，越慢一点）
 FACTOR_LOOKBACK_DAYS = 30
+
+# 并行抓取的进程数（baostock 连接是模块级全局、非线程安全，只能多进程；
+# 每进程独立登录。限流报错时调小此值即可）。
+WORKERS = int(os.environ.get("BAOSTOCK_WORKERS", "8"))
 
 # =========================
 # 路径区
@@ -370,73 +376,97 @@ def update_one_stock(code: str, factor_check_start: str) -> dict:
     }
 
 
+def _pool_init():
+    """每个 worker 进程启动时登录一次 baostock，进程退出时登出。"""
+    lg = bs.login()
+    if lg.error_code != "0":
+        raise RuntimeError(f"baostock login failed in worker: {lg.error_msg}")
+    atexit.register(bs.logout)
+
+
+def _update_task(args):
+    """进程池任务：更新单只股票，异常转成 ERROR 结果而非抛出（避免拖垮整个池）。"""
+    code, factor_check_start = args
+    try:
+        return update_one_stock(code, factor_check_start=factor_check_start)
+    except Exception as e:
+        return {"code": code, "mode": "ERROR", "error": str(e)}
+
+
 def main():
     ensure_dirs()
     state = load_state()
 
+    # -------- 主进程登录一次：仅用于拉股票列表 + 刷新名称映射 --------
     lg = bs.login()
     if lg.error_code != "0":
         raise RuntimeError(f"baostock login failed: {lg.error_msg}")
-
     try:
         stock_df = get_stock_list()
         codes = stock_df["code"].tolist()
-
         # 顺便刷新代码->名称映射，供看板显示公司名称（随 HF 同步）
         save_name_map(stock_df)
-
-        factor_check_start = (datetime.today() - timedelta(days=FACTOR_LOOKBACK_DAYS)).strftime("%Y-%m-%d")
-        if factor_check_start < START_DATE:
-            factor_check_start = START_DATE
-
-        stats = {
-            "FULL_REBUILD": 0,
-            "INIT": 0,
-            "BACKFILL": 0,
-            "INCREMENTAL": 0,
-            "NOOP": 0,
-            "ERROR": 0
-        }
-        errors = []
-
-        for code in tqdm(codes, desc="Updating HS Mainboard (front-adjusted)"):
-            try:
-                r = update_one_stock(code, factor_check_start=factor_check_start)
-                mode = r["mode"]
-
-                if mode == "FULL_REBUILD":
-                    stats["FULL_REBUILD"] += 1
-                elif mode == "INIT":
-                    stats["INIT"] += 1
-                elif mode.startswith("BACKFILL"):
-                    stats["BACKFILL"] += 1
-                    if mode.endswith("INCREMENTAL"):
-                        stats["INCREMENTAL"] += 1
-                    else:
-                        stats["NOOP"] += 1
-                elif mode == "INCREMENTAL":
-                    stats["INCREMENTAL"] += 1
-                elif mode == "INCREMENTAL_NOOP":
-                    stats["NOOP"] += 1
-
-            except Exception as e:
-                stats["ERROR"] += 1
-                errors.append((code, str(e)))
-
-        state["last_run"] = datetime.today().strftime("%Y-%m-%d %H:%M:%S")
-        save_state(state)
-
-        print("\n=== DONE ===")
-        print("Saved to:", os.path.abspath(BASE_DIR))
-        print("Total stocks:", len(codes))
-        print("Stats:", stats)
-        if errors:
-            print("\n--- Errors (showing up to 30) ---")
-            for code, msg in errors[:30]:
-                print(code, "=>", msg)
-
     finally:
         bs.logout()
+
+    factor_check_start = (datetime.today() - timedelta(days=FACTOR_LOOKBACK_DAYS)).strftime("%Y-%m-%d")
+    if factor_check_start < START_DATE:
+        factor_check_start = START_DATE
+
+    # 仅供本地冒烟测试：STOCK_LIMIT=N 只处理前 N 只，默认 0=不限
+    limit = int(os.environ.get("STOCK_LIMIT", "0"))
+    if limit > 0:
+        codes = codes[:limit]
+
+    stats = {
+        "FULL_REBUILD": 0,
+        "INIT": 0,
+        "BACKFILL": 0,
+        "INCREMENTAL": 0,
+        "NOOP": 0,
+        "ERROR": 0
+    }
+    errors = []
+
+    # -------- 多进程并行更新每只股票（每进程独立 baostock 登录）--------
+    tasks = [(code, factor_check_start) for code in codes]
+    with ProcessPoolExecutor(max_workers=WORKERS, initializer=_pool_init) as ex:
+        for r in tqdm(
+            ex.map(_update_task, tasks, chunksize=16),
+            total=len(tasks),
+            desc="Updating HS Mainboard (front-adjusted)",
+        ):
+            mode = r["mode"]
+            if mode == "ERROR":
+                stats["ERROR"] += 1
+                errors.append((r.get("code"), r.get("error")))
+            elif mode == "FULL_REBUILD":
+                stats["FULL_REBUILD"] += 1
+            elif mode == "INIT":
+                stats["INIT"] += 1
+            elif mode.startswith("BACKFILL"):
+                stats["BACKFILL"] += 1
+                if mode.endswith("INCREMENTAL"):
+                    stats["INCREMENTAL"] += 1
+                else:
+                    stats["NOOP"] += 1
+            elif mode == "INCREMENTAL":
+                stats["INCREMENTAL"] += 1
+            elif mode == "INCREMENTAL_NOOP":
+                stats["NOOP"] += 1
+
+    state["last_run"] = datetime.today().strftime("%Y-%m-%d %H:%M:%S")
+    save_state(state)
+
+    print("\n=== DONE ===")
+    print("Saved to:", os.path.abspath(BASE_DIR))
+    print("Total stocks:", len(codes))
+    print(f"Workers: {WORKERS}")
+    print("Stats:", stats)
+    if errors:
+        print("\n--- Errors (showing up to 30) ---")
+        for code, msg in errors[:30]:
+            print(code, "=>", msg)
 
 
 if __name__ == "__main__":
