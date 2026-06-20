@@ -181,12 +181,20 @@ http://47.109.138.67:8501
 
 ## 更新代码
 
-当项目有新更新时：
+当项目有新更新时，**一键更新**（拉取代码 → 按需 `uv sync` → 重启服务 → 打印状态）：
+
+```bash
+bash /home/wechatnum/Project/wechatnum/WechatNum/deploy/update.sh
+```
+
+> 脚本仅在 `pyproject.toml` / `uv.lock` 变更时才运行 `uv sync`，否则跳过以加快更新。
+
+手动等价步骤（如需逐步排查）：
 
 ```bash
 cd /home/wechatnum/Project/wechatnum/WechatNum
 git pull origin main
-uv sync
+uv sync          # 依赖无变更时可省略
 sudo systemctl restart dashboard
 ```
 

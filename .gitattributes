@@ -1,0 +1,2 @@
+# Shell 脚本强制 LF 行尾，避免在 Windows 上 checkout 成 CRLF 导致服务器 bash 报错
+*.sh text eol=lf
