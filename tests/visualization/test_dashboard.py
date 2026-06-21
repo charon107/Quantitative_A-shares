@@ -82,6 +82,50 @@ class TestFilterStocks:
         assert dashboard.filter_stocks(["sh.600015"], {}, "华夏") == []
 
 
+# ========== samples_for_duration（纯函数：按时长筛公司） ==========
+class TestSamplesForDuration:
+    DETAIL = pd.DataFrame({
+        "code": ["sh.600015", "sz.000001", "sh.600016", "sz.000002"],
+        "start_date": ["2025-02-01", "2025-03-10", "2025-01-05", "2025-04-01"],
+        "end_date": ["2025-02-12", "2025-03-21", "2025-01-16", "2026-06-18"],
+        "duration": [7, 7, 12, 7],
+        "ongoing": [False, False, False, True],
+    })
+    NAME_MAP = {"sh.600015": "华夏银行", "sz.000001": "平安银行", "sh.600016": "民生银行"}
+
+    def test_filters_and_shapes(self):
+        """选某时长：只返回该时长行、固定中文列、按上穿日降序"""
+        out = dashboard.samples_for_duration(self.DETAIL, 7, self.NAME_MAP)
+        assert list(out.columns) == ["名称", "代码", "上穿日", "结束日", "状态"]
+        assert len(out) == 3
+        # 按上穿日降序：2025-04-01 > 2025-03-10 > 2025-02-01
+        assert out["代码"].tolist() == ["sz.000002", "sz.000001", "sh.600015"]
+
+    def test_name_and_status_mapping(self):
+        """名称映射 + ongoing → 未结束/已结束"""
+        out = dashboard.samples_for_duration(self.DETAIL, 7, self.NAME_MAP)
+        row_hx = out[out["代码"] == "sh.600015"].iloc[0]
+        assert row_hx["名称"] == "华夏银行"
+        assert row_hx["状态"] == "已结束"
+        row_og = out[out["代码"] == "sz.000002"].iloc[0]
+        assert row_og["状态"] == "未结束"
+        assert row_og["名称"] == ""  # 不在 name_map 中 → 留空，不报错
+
+    def test_other_duration(self):
+        """另一时长只命中对应行"""
+        out = dashboard.samples_for_duration(self.DETAIL, 12, self.NAME_MAP)
+        assert out["代码"].tolist() == ["sh.600016"]
+        assert out.iloc[0]["状态"] == "已结束"
+
+    def test_no_match_returns_empty(self):
+        """无匹配时长 → 空 DataFrame"""
+        assert dashboard.samples_for_duration(self.DETAIL, 99, self.NAME_MAP).empty
+
+    def test_empty_detail(self):
+        """空明细 → 空 DataFrame，不抛异常"""
+        assert dashboard.samples_for_duration(pd.DataFrame(), 7, {}).empty
+
+
 # ========== load_name_map（读 parquet + 容错） ==========
 class TestLoadNameMap:
     def test_normal(self, tmp_path, monkeypatch):

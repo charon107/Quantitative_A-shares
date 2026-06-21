@@ -143,6 +143,33 @@ def filter_stocks(codes, name_map: dict, query: str) -> list:
     ]
 
 
+def samples_for_duration(detail: pd.DataFrame, duration: int, name_map: dict) -> pd.DataFrame:
+    """
+    从多头时长明细中筛出「持续恰好 duration 天」的样本，整理成可展示表。
+
+    参数：
+        detail: 含 code/start_date/end_date/duration/ongoing 列的样本明细
+        duration: 目标持续天数（交易日）
+        name_map: 代码 -> 公司名称映射
+
+    返回：
+        DataFrame，列为 [名称, 代码, 上穿日, 结束日, 状态]，按上穿日降序。
+        无匹配或 detail 为空时返回空 DataFrame。
+    """
+    if detail.empty or "duration" not in detail.columns:
+        return pd.DataFrame()
+
+    sub = detail[detail["duration"] == duration].copy()
+    if sub.empty:
+        return pd.DataFrame()
+
+    sub.insert(0, "名称", sub["code"].map(lambda c: name_map.get(c, "")))
+    sub["状态"] = sub["ongoing"].map(lambda v: "未结束" if v else "已结束")
+    out = sub.rename(columns={"code": "代码", "start_date": "上穿日", "end_date": "结束日"})
+    out = out[["名称", "代码", "上穿日", "结束日", "状态"]]
+    return out.sort_values("上穿日", ascending=False).reset_index(drop=True)
+
+
 # 起始范围选项 → start_date 映射
 _RANGE_OPTIONS = ["近3月", "近6月", "今年至今", "全部"]
 
@@ -433,7 +460,55 @@ def tab_ma_duration():
         annotation_font_color=COLORS["text_secondary"],
     )
     fig = apply_chart_theme(fig, height=420, show_legend=True)
-    st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
+    event = st.plotly_chart(
+        fig, width="stretch", on_select="rerun",
+        key="ma_dur_chart", config={"displayModeBar": False},
+    )
+
+    # ===== 下钻：点击柱子 → 查看对应持续天数的公司 =====
+    sel = getattr(event, "selection", None)
+    pts = sel.get("points", []) if isinstance(sel, dict) else (getattr(sel, "points", []) or [])
+    sel_duration = int(round(pts[0]["x"])) if pts else None
+
+    if sel_duration is None:
+        st.info("👆 点击上方柱子查看对应持续天数的公司")
+        return
+
+    st.subheader(f"持续 {sel_duration} 天的公司")
+    name_map = load_name_map()
+    table = samples_for_duration(detail, sel_duration, name_map)
+
+    query = st.text_input(
+        "筛选（输入代码或公司名称，支持模糊匹配）",
+        placeholder="如：银行 / 600015",
+        key="ma_dur_filter",
+    )
+    if query.strip():
+        matched = set(filter_stocks(table["代码"].tolist(), name_map, query))
+        table = table[table["代码"].isin(matched)].reset_index(drop=True)
+
+    st.caption(f"共 {len(table)} 个样本（持续恰好 {sel_duration} 天）")
+
+    st.caption("点击任意行查看该股 K线速览")
+    event2 = st.dataframe(
+        table, width="stretch", hide_index=True,
+        on_select="rerun", selection_mode="single-row", key="ma_dur_table",
+    )
+
+    # 行选择 → 内联渲染该股 K线（复用排行榜模式）
+    sel_rows = []
+    if event2 is not None and getattr(event2, "selection", None):
+        sel_rows = event2.selection.get("rows", []) if isinstance(event2.selection, dict) else event2.selection.rows
+    if sel_rows:
+        sel_code = str(table.iloc[sel_rows[0]]["代码"])
+        with st.expander(f"K线速览 · {format_stock_label(sel_code, name_map)}", expanded=True):
+            with st.spinner("加载 K线中…"):
+                df_k = load_kline_cached(sel_code)
+            if df_k.empty:
+                st.warning("无法加载该股票的 K线数据")
+            else:
+                fig_k = build_kline_fig(df_k, n=120, height=420)
+                st.plotly_chart(fig_k, width="stretch", config={"displayModeBar": False})
 
 
 # ========== Tab 2: 个股查询 ==========
