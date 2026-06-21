@@ -5,6 +5,7 @@ parquet_A股_2007-2024_Q4/
 parquet_A股_2007-2024_Q4.zip
 网格搜索涨停策略/bs_cache/
 网格搜索最严格涨停/bs_cache/
+ma5_ma10_duration_out/
 *.zip
 
 # Python
