@@ -170,6 +170,39 @@ def samples_for_duration(detail: pd.DataFrame, duration: int, name_map: dict) ->
     return out.sort_values("上穿日", ascending=False).reset_index(drop=True)
 
 
+def dedup_recent(hist: list, code: str, max_n: int = 8) -> list:
+    """把 code 置顶加入最近查看列表：去重、最近的在前、最多保留 max_n 条。返回新列表。"""
+    new = [code] + [c for c in hist if c != code]
+    return new[:max_n]
+
+
+# ===== 跨页跳转 & 最近查看（依赖 st.session_state，非纯函数）=====
+RECENT_MAX = 8
+
+
+def jump_to_query(code: str, guard_key: str) -> None:
+    """
+    从榜单/明细行跳转到「个股查询」页查看该股。
+
+    - _goto_page 为非 widget 键，由 main() 在导航控件实例化前消费 → 切到个股查询。
+    - jump_code 供个股查询页设置 current_code。
+    - guard_key 记住本次已跳转的代码，防止返回该页时凭旧选中重复跳转。
+    """
+    if st.session_state.get(guard_key) == code:
+        return
+    st.session_state[guard_key] = code
+    st.session_state._goto_page = "个股查询"
+    st.session_state.jump_code = code
+    st.rerun()
+
+
+def push_recent(code: str) -> None:
+    """记录最近查看（会话级）。"""
+    st.session_state.recent_codes = dedup_recent(
+        st.session_state.get("recent_codes", []), code, RECENT_MAX
+    )
+
+
 # 起始范围选项 → start_date 映射
 _RANGE_OPTIONS = ["近3月", "近6月", "今年至今", "全部"]
 
@@ -489,26 +522,34 @@ def tab_ma_duration():
 
     st.caption(f"共 {len(table)} 个样本（持续恰好 {sel_duration} 天）")
 
-    st.caption("点击任意行查看该股 K线速览")
+    st.caption("点击任意行跳转到「个股查询」查看该股详情")
     event2 = st.dataframe(
         table, width="stretch", hide_index=True,
         on_select="rerun", selection_mode="single-row", key="ma_dur_table",
     )
 
-    # 行选择 → 内联渲染该股 K线（复用排行榜模式）
+    # 行选择 → 跳转到个股查询页
     sel_rows = []
     if event2 is not None and getattr(event2, "selection", None):
         sel_rows = event2.selection.get("rows", []) if isinstance(event2.selection, dict) else event2.selection.rows
     if sel_rows:
-        sel_code = str(table.iloc[sel_rows[0]]["代码"])
-        with st.expander(f"K线速览 · {format_stock_label(sel_code, name_map)}", expanded=True):
-            with st.spinner("加载 K线中…"):
-                df_k = load_kline_cached(sel_code)
-            if df_k.empty:
-                st.warning("无法加载该股票的 K线数据")
-            else:
-                fig_k = build_kline_fig(df_k, n=120, height=420)
-                st.plotly_chart(fig_k, width="stretch", config={"displayModeBar": False})
+        jump_to_query(str(table.iloc[sel_rows[0]]["代码"]), "_ma_nav")
+
+
+def render_query_default(name_map: dict) -> None:
+    """个股查询未选股时的默认页：提示 + 最近查看（本会话浏览过的股票，可一键重开）。"""
+    st.info("请在上方输入关键词并从候选中选择股票，或点击下方「最近查看」快速打开。")
+
+    recent = st.session_state.get("recent_codes", [])
+    if not recent:
+        return
+    st.subheader("最近查看")
+    cols = st.columns(4)
+    for i, c in enumerate(recent):
+        with cols[i % 4]:
+            if st.button(format_stock_label(c, name_map), key=f"recent_{c}", width="stretch"):
+                st.session_state.current_code = c
+                st.rerun()
 
 
 # ========== Tab 2: 个股查询 ==========
@@ -530,24 +571,34 @@ def tab_stock_query():
         matches = filter_stocks(stock_list, name_map, term)
         return [(format_stock_label(c, name_map), c) for c in matches[:SEARCH_MAX_RESULTS]]
 
-    selected_code = st_searchbox(
+    sb_code = st_searchbox(
         search_stocks,
         placeholder="输入代码或公司名称，如：600015 / 华夏 / sh.600",
         label="搜索股票（支持代码、公司名称、模糊匹配）",
         key="stock_searchbox",
     )
 
-    if not selected_code:
-        st.info("请在上方输入关键词并从候选中选择股票")
+    # 当前股票来源优先级：跨页跳转 > 搜索框新选择 > 已记忆的 current_code
+    jump = st.session_state.pop("jump_code", None)
+    if jump:
+        st.session_state.current_code = jump
+    elif sb_code:
+        st.session_state.current_code = sb_code
+    code = st.session_state.get("current_code")
+
+    if not code:
+        render_query_default(name_map)
         return
 
+    push_recent(code)  # 记入「最近查看」
+
     st.markdown(
-        badge(f"已选择 · {format_stock_label(selected_code, name_map)}", "ok"),
+        badge(f"已选择 · {format_stock_label(code, name_map)}", "ok"),
         unsafe_allow_html=True,
     )
 
     with st.spinner("加载 K线数据中…"):
-        df_k = load_kline_cached(selected_code)
+        df_k = load_kline_cached(code)
     if df_k.empty:
         st.warning("无法加载该股票的 K线数据")
         return
@@ -582,7 +633,7 @@ def tab_stock_query():
 
     # 20 日滚动年化波动率曲线
     try:
-        vol = rolling_volatility(selected_code, DATA_DIR)
+        vol = rolling_volatility(code, DATA_DIR)
         vol_view = vol.tail(n) if n else vol
         date_view = df_k["date"].tail(n) if n else df_k["date"]
         fig_vol = go.Figure()
@@ -664,7 +715,7 @@ def tab_rankings():
         "turn": "换手率(%)",
     }).reset_index(drop=True)
 
-    st.caption("点击任意行查看该股 K线速览")
+    st.caption("点击任意行跳转到「个股查询」查看该股详情")
     event = st.dataframe(
         style_ranking(display_df),
         width="stretch",
@@ -674,20 +725,12 @@ def tab_rankings():
         key="rank_table",
     )
 
-    # 行选择 → 内联渲染该股 K线（避免 Streamlit 无法程序化切 tab）
+    # 行选择 → 跳转到个股查询页
     sel_rows = []
     if event is not None and getattr(event, "selection", None):
         sel_rows = event.selection.get("rows", []) if isinstance(event.selection, dict) else event.selection.rows
     if sel_rows:
-        sel_code = str(display_df.iloc[sel_rows[0]]["代码"])
-        with st.expander(f"K线速览 · {format_stock_label(sel_code, name_map)}", expanded=True):
-            with st.spinner("加载 K线中…"):
-                df_k = load_kline_cached(sel_code)
-            if df_k.empty:
-                st.warning("无法加载该股票的 K线数据")
-            else:
-                fig = build_kline_fig(df_k, n=120, height=420)
-                st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
+        jump_to_query(str(display_df.iloc[sel_rows[0]]["代码"]), "_rank_nav")
 
 
 # ========== Tab 4: 数据状态 ==========
@@ -781,6 +824,16 @@ def render_sidebar(df_latest: pd.DataFrame) -> None:
 
 
 # ========== 主应用 ==========
+# 页面路由：名称 -> 渲染函数（顺序即导航顺序）
+PAGES = {
+    "大盘概览": tab_market_overview,
+    "个股查询": tab_stock_query,
+    "排行榜": tab_rankings,
+    "多头时长": tab_ma_duration,
+    "数据状态": tab_data_status,
+}
+
+
 def main():
     inject_global_css()
 
@@ -788,25 +841,17 @@ def main():
     render_header(df_latest)
     render_sidebar(df_latest)
 
-    # 5 个 Tab
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(
-        ["大盘概览", "个股查询", "排行榜", "多头时长", "数据状态"]
+    # 顶部导航（segmented_control 替代 st.tabs，以支持跨页跳转）。
+    # 来自其它页面的跳转请求经非 widget 键 _goto_page 传入：必须在控件实例化「之前」写其 key，
+    # 规避 Streamlit「widget 实例化后不可修改其 session_state key」的限制。
+    if "_goto_page" in st.session_state:
+        st.session_state["nav"] = st.session_state.pop("_goto_page")
+    st.session_state.setdefault("nav", "大盘概览")
+    choice = st.segmented_control(
+        "页面导航", list(PAGES), key="nav", label_visibility="collapsed",
     )
-
-    with tab1:
-        tab_market_overview()
-
-    with tab2:
-        tab_stock_query()
-
-    with tab3:
-        tab_rankings()
-
-    with tab4:
-        tab_ma_duration()
-
-    with tab5:
-        tab_data_status()
+    page = choice if choice in PAGES else "大盘概览"
+    PAGES[page]()
 
 
 @st.cache_data(ttl=3600)

@@ -57,8 +57,10 @@ def inject_global_css() -> None:
 
         html, body, [class*="css"], .stApp {{ font-family: {_FONT_SANS}; }}
 
-        /* 收紧顶部留白，信息密度更高 */
-        .block-container {{ padding-top: 2.2rem; padding-bottom: 3rem; }}
+        /* 顶部留白：留足空间避免标题被 Streamlit 顶栏裁切 */
+        .block-container {{ padding-top: 3.6rem; padding-bottom: 3rem; }}
+        /* 顶栏透明，不遮挡下方内容 */
+        [data-testid="stHeader"] {{ background: transparent; }}
 
         /* ===== 页头 ===== */
         .app-header {{
@@ -115,6 +117,25 @@ def inject_global_css() -> None:
         .stTabs [data-baseweb="tab"]:hover {{ color: {c['text']}; background: {c['panel']}; }}
         .stTabs [aria-selected="true"] {{ color: {c['accent']} !important; }}
         .stTabs [data-baseweb="tab-highlight"] {{ background-color: {c['accent']}; height: 3px; }}
+
+        /* ===== 顶部导航（segmented_control 仿 tab 观感） ===== */
+        [data-testid="stSegmentedControl"] {{
+            margin-bottom: 14px; border-bottom: 1px solid {c['border']};
+        }}
+        [data-testid="stSegmentedControl"] > div {{ gap: 4px; }}
+        [data-testid="stSegmentedControl"] button {{
+            background: transparent !important; border: none !important;
+            color: {c['text_secondary']} !important; font-weight: 500; height: 42px;
+            border-radius: 8px 8px 0 0; transition: color .2s ease, background-color .2s ease;
+        }}
+        [data-testid="stSegmentedControl"] button:hover {{
+            color: {c['text']} !important; background: {c['panel']} !important;
+        }}
+        [data-testid="stSegmentedControl"] button[aria-checked="true"],
+        [data-testid="stSegmentedControl"] button[kind="segmented_controlActive"] {{
+            color: {c['accent']} !important; background: transparent !important;
+            box-shadow: inset 0 -3px 0 {c['accent']};
+        }}
 
         /* ===== 标题 ===== */
         h1, h2, h3 {{ color: {c['text']}; letter-spacing: .3px; }}

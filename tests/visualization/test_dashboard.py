@@ -126,6 +126,25 @@ class TestSamplesForDuration:
         assert dashboard.samples_for_duration(pd.DataFrame(), 7, {}).empty
 
 
+# ========== dedup_recent（纯函数：最近查看去重置顶） ==========
+class TestDedupRecent:
+    def test_empty_history(self):
+        """空历史：只含新代码"""
+        assert dashboard.dedup_recent([], "sh.600015") == ["sh.600015"]
+
+    def test_prepend_new(self):
+        """新代码置顶，其余保序"""
+        assert dashboard.dedup_recent(["a", "b"], "c") == ["c", "a", "b"]
+
+    def test_dedup_move_to_front(self):
+        """已存在的代码移到最前，不重复"""
+        assert dashboard.dedup_recent(["a", "b", "c"], "b") == ["b", "a", "c"]
+
+    def test_truncate_to_max(self):
+        """超出 max_n 截断，保留最近的"""
+        assert dashboard.dedup_recent(["a", "b", "c"], "d", max_n=3) == ["d", "a", "b"]
+
+
 # ========== load_name_map（读 parquet + 容错） ==========
 class TestLoadNameMap:
     def test_normal(self, tmp_path, monkeypatch):
