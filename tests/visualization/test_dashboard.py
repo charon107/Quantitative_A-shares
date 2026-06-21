@@ -156,6 +156,8 @@ class TestTabsEmptyDataGraceful:
         monkeypatch.setattr(dashboard, "load_equal_weighted_index", lambda *a, **k: pd.Series(dtype=float))
         monkeypatch.setattr(dashboard, "load_limit_up_down", lambda: pd.DataFrame())
         monkeypatch.setattr(dashboard, "load_name_map", lambda: {})
+        # 避免真跑全市场 3361 只
+        monkeypatch.setattr(dashboard, "load_ma_duration_samples", lambda: pd.DataFrame())
 
     def test_market_overview_no_crash(self):
         dashboard.tab_market_overview()  # 不应抛异常
@@ -165,6 +167,9 @@ class TestTabsEmptyDataGraceful:
 
     def test_rankings_no_crash(self):
         dashboard.tab_rankings()
+
+    def test_ma_duration_no_crash(self):
+        dashboard.tab_ma_duration()  # 空数据走 st.info 分支，不应抛异常
 
     def test_data_status_no_crash(self):
         dashboard.tab_data_status()

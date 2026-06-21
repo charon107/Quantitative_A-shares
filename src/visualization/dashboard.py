@@ -93,6 +93,17 @@ def load_limit_up_down():
 
 
 @st.cache_data(ttl=3600)
+def load_ma_duration_samples():
+    """加载 MA5>MA10 金叉区间样本（全市场重算，缓存 1 小时）"""
+    try:
+        from src.analysis.ma5_above_ma10_duration import compute_duration_samples
+        return compute_duration_samples(DATA_DIR)
+    except Exception as e:
+        st.warning(f"计算 MA 多头时长失败：{e}")
+        return pd.DataFrame()
+
+
+@st.cache_data(ttl=3600)
 def load_name_map() -> dict:
     """
     加载代码->公司名称映射（缓存 1 小时）。
@@ -318,29 +329,111 @@ def tab_market_overview():
     else:
         st.info("等权指数数据不足")
 
-    # 涨停/跌停走势
+    # 涨停/跌停走势（镜像柱状图：涨停向上、跌停向下，0 为中轴）
     st.subheader("涨停 / 跌停统计")
     with st.spinner("统计涨跌停中…"):
         limit_df = load_limit_up_down()
+    # 响应上方「起始范围」下拉框；过滤置于 not empty 守卫内，避免空 DataFrame 无 date 列报错
+    if not limit_df.empty:
+        mask = pd.to_datetime(limit_df["date"]) >= pd.Timestamp(start_date)
+        limit_df = limit_df[mask]
     if not limit_df.empty:
         x_dates = pd.to_datetime(limit_df["date"])
         fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=x_dates, y=limit_df["limit_up"],
-            mode="lines", name="涨停家数",
-            line=dict(color=COLORS["warn"], width=2),
+        fig.add_trace(go.Bar(
+            x=x_dates, y=limit_df["limit_up"], name="涨停家数",
+            marker_color=COLORS["warn"], marker_line_width=0,
+            hovertemplate="%{y} 家<extra>涨停家数</extra>",
         ))
-        fig.add_trace(go.Scatter(
-            x=x_dates, y=limit_df["limit_down"],
-            mode="lines", name="跌停家数",
-            line=dict(color=COLORS["info"], width=2),
+        fig.add_trace(go.Bar(
+            x=x_dates, y=-limit_df["limit_down"], name="跌停家数",
+            marker_color=COLORS["info"], marker_line_width=0,
+            customdata=limit_df["limit_down"],
+            hovertemplate="%{customdata} 家<extra>跌停家数</extra>",
         ))
         fig.update_yaxes(title_text="家数")
+        fig.update_layout(barmode="overlay", bargap=0.15)
         fig = apply_chart_theme(fig, height=400, show_legend=True)
         fig = add_range_selector(fig)
         st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
     else:
         st.info("涨停/跌停数据不足")
+
+
+# ========== Tab: 多头时长 (MA5>MA10) ==========
+def tab_ma_duration():
+    """多头时长 tab：全市场 MA5>MA10 金叉区间的持续时长分布（KPI + 直方图）。"""
+    st.header("多头时长")
+    st.caption(
+        "口径：按收盘价算 MA5/MA10，每段 MA5 > MA10 的连续交易日为一个样本，"
+        "上穿日 ≥ 2025-01-01；「未结束」= 截至最新交易日 MA5 仍 > MA10（时长为下限）。"
+    )
+
+    with st.spinner("统计全市场 MA 多头时长中…（首次约需数十秒）"):
+        detail = load_ma_duration_samples()
+
+    if detail.empty:
+        st.info("数据不足")
+        return
+
+    dur = detail["duration"]
+    n_total = len(detail)
+    n_ongoing = int(detail["ongoing"].sum())
+    median = dur.median()
+    p90 = dur.quantile(0.90)
+    max_d = int(dur.max())
+
+    # KPI 卡
+    c1, c2, c3, c4, c5 = st.columns(5)
+    with c1:
+        kpi_card("样本总数", f"{n_total:,}", tone="primary")
+    with c2:
+        kpi_card("中位时长", f"{median:.0f} 天", tone="neutral")
+    with c3:
+        kpi_card("P90 时长", f"{p90:.0f} 天", tone="neutral")
+    with c4:
+        kpi_card("最长", f"{max_d} 天", tone="neutral")
+    with c5:
+        kpi_card("未结束", f"{n_ongoing:,}", tone="warn")
+
+    st.write("")
+    log_y = st.toggle("对数 Y 轴", value=False, key="ma_dur_logy")
+
+    # 按整数天数统计 已结束 / 未结束 计数（堆叠）
+    bins = range(1, max_d + 1)
+    closed_counts = detail.loc[~detail["ongoing"], "duration"].value_counts().reindex(bins, fill_value=0)
+    ongoing_counts = detail.loc[detail["ongoing"], "duration"].value_counts().reindex(bins, fill_value=0)
+    x = list(bins)
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=x, y=closed_counts.values, name="已结束",
+        marker_color=COLORS["accent"], marker_line_width=0,
+        hovertemplate="%{x} 天<br>已结束 %{y} 个<extra></extra>",
+    ))
+    fig.add_trace(go.Bar(
+        x=x, y=ongoing_counts.values, name="未结束",
+        marker_color=COLORS["warn"], marker_line_width=0,
+        hovertemplate="%{x} 天<br>未结束 %{y} 个<extra></extra>",
+    ))
+    fig.update_layout(barmode="stack", bargap=0.1)
+    fig.update_xaxes(title_text="持续交易日数")
+    fig.update_yaxes(title_text="样本数")
+    if log_y:
+        fig.update_yaxes(type="log")
+    # 中位数 / P90 参考线
+    fig.add_vline(
+        x=median, line=dict(color=MA_COLORS[20], width=1.2, dash="dash"),
+        annotation_text=f"中位 {median:.0f}", annotation_position="top",
+        annotation_font_color=COLORS["text_secondary"],
+    )
+    fig.add_vline(
+        x=p90, line=dict(color=MA_COLORS[60], width=1.2, dash="dot"),
+        annotation_text=f"P90 {p90:.0f}", annotation_position="top",
+        annotation_font_color=COLORS["text_secondary"],
+    )
+    fig = apply_chart_theme(fig, height=420, show_legend=True)
+    st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
 
 
 # ========== Tab 2: 个股查询 ==========
@@ -620,8 +713,10 @@ def main():
     render_header(df_latest)
     render_sidebar(df_latest)
 
-    # 4 个 Tab
-    tab1, tab2, tab3, tab4 = st.tabs(["大盘概览", "个股查询", "排行榜", "数据状态"])
+    # 5 个 Tab
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(
+        ["大盘概览", "个股查询", "排行榜", "多头时长", "数据状态"]
+    )
 
     with tab1:
         tab_market_overview()
@@ -633,6 +728,9 @@ def main():
         tab_rankings()
 
     with tab4:
+        tab_ma_duration()
+
+    with tab5:
         tab_data_status()
 
 
