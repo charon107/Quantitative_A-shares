@@ -75,7 +75,7 @@ def upload_to_hf():
 
 def main():
     if len(sys.argv) < 2:
-        print("用法: python -m src.data_collection.hf_sync <download|upload>")
+        print("用法: python -m src.data_collection.hf_sync <download|upload|clear-redis-cache>")
         sys.exit(1)
 
     action = sys.argv[1]
@@ -83,6 +83,10 @@ def main():
         download_from_hf()
     elif action == "upload":
         upload_to_hf()
+    elif action == "clear-redis-cache":
+        from src.visualization.redis_cache import invalidate_all
+        deleted = invalidate_all()
+        print(f"[hf_sync] Redis 缓存已清空 ({deleted} keys)")
     else:
         print(f"未知操作: {action}")
         sys.exit(1)

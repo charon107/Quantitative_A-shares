@@ -1,6 +1,7 @@
 [Unit]
 Description=A股股价数据可视化看板
-After=network.target
+After=network.target redis-server.service
+Wants=redis-server.service
 StartLimitIntervalSec=0
 
 [Service]
@@ -8,6 +9,7 @@ Type=simple
 User=root
 WorkingDirectory=/home/wechatnum/Project/wechatnum/WechatNum
 Environment="HF_TOKEN=${HF_TOKEN}"
+Environment="REDIS_URL=redis://127.0.0.1:6379/0"
 ExecStart=/usr/bin/env uv run streamlit run src/visualization/dashboard.py --server.port 8501
 Restart=on-failure
 RestartSec=10s

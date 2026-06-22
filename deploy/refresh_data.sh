@@ -19,6 +19,8 @@ uv run python -m src.data_collection.hf_sync download
 
 if [ $? -eq 0 ]; then
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Data refresh completed successfully"
+    # 数据更新后清空 Redis 缓存，下次页面加载从新数据重算
+    uv run python -m src.data_collection.hf_sync clear-redis-cache || true
 else
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Data refresh failed"
     exit 1

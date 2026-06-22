@@ -52,6 +52,25 @@ SEARCH_MAX_RESULTS = 50
 RANK_TOP_N = 50
 
 
+# ========== 响应式布局辅助 ==========
+def kpi_columns(n_desktop: int = 4) -> list:
+    """返回 st.columns 列表，始终返回 n_desktop 列（便于列表索引）。
+
+    列数不变，响应式堆叠由 CSS 媒体查询控制。
+    """
+    return st.columns(n_desktop)
+
+
+def chart_height(desktop: int) -> int:
+    """图表高度（预留接口，当前直接返回桌面值；响应式由 Plotly width='stretch' 处理缩放）。"""
+    return desktop
+
+
+def ranking_columns_df(df: "pd.DataFrame") -> "pd.DataFrame":
+    """排行榜列过滤（当前不做精简；手机端横向滚动由 CSS overflow-x:auto 处理）。"""
+    return df
+
+
 # ========== 配置 ==========
 DATA_DIR = "股价数据_parquet_fq"
 st.set_page_config(
@@ -64,61 +83,81 @@ st.set_page_config(
 # ========== 缓存函数 ==========
 @st.cache_data(ttl=3600)
 def load_latest_day():
-    """加载最新一日的全市场数据（缓存 1 小时）"""
-    try:
-        return load_all_latest_day(DATA_DIR)
-    except Exception as e:
-        st.warning(f"加载数据失败：{e}")
-        return pd.DataFrame()
+    """加载最新一日的全市场数据（L1 1h | L2 Redis 24h）"""
+    from src.visualization.redis_cache import try_load
+    def compute():
+        try:
+            return load_all_latest_day(DATA_DIR)
+        except Exception as e:
+            st.warning(f"加载数据失败：{e}")
+            return pd.DataFrame()
+    result, _hit = try_load("load_latest_day", fallback_fn=compute, ttl=86400)
+    return result
 
 
 @st.cache_data(ttl=3600)
 def load_equal_weighted_index(start_date: str = "2025-01-01"):
-    """计算等权指数走势（缓存 1 小时）"""
-    try:
-        return equal_weighted_index(DATA_DIR, start_date=start_date)
-    except Exception as e:
-        st.warning(f"计算等权指数失败：{e}")
-        return pd.Series()
+    """计算等权指数走势（L1 1h | L2 Redis 24h）"""
+    from src.visualization.redis_cache import try_load
+    def compute():
+        try:
+            return equal_weighted_index(DATA_DIR, start_date=start_date)
+        except Exception as e:
+            st.warning(f"计算等权指数失败：{e}")
+            return pd.Series()
+    result, _hit = try_load("load_equal_weighted_index", relevant_params={"start_date": start_date}, fallback_fn=compute, ttl=86400)
+    return result
 
 
 @st.cache_data(ttl=3600)
 def load_limit_up_down():
-    """加载涨停/跌停走势（缓存 1 小时）"""
-    try:
-        return limit_up_down_series(DATA_DIR)
-    except Exception as e:
-        st.warning(f"加载涨停数据失败：{e}")
-        return pd.DataFrame()
+    """加载涨停/跌停走势（L1 1h | L2 Redis 24h）"""
+    from src.visualization.redis_cache import try_load
+    def compute():
+        try:
+            return limit_up_down_series(DATA_DIR)
+        except Exception as e:
+            st.warning(f"加载涨停数据失败：{e}")
+            return pd.DataFrame()
+    result, _hit = try_load("load_limit_up_down", fallback_fn=compute, ttl=86400)
+    return result
 
 
 @st.cache_data(ttl=3600)
 def load_ma_duration_samples():
-    """加载 MA5>MA10 金叉区间样本（全市场重算，缓存 1 小时）"""
-    try:
-        from src.analysis.ma5_above_ma10_duration import compute_duration_samples
-        return compute_duration_samples(DATA_DIR)
-    except Exception as e:
-        st.warning(f"计算 MA 多头时长失败：{e}")
-        return pd.DataFrame()
+    """加载 MA5>MA10 金叉区间样本（L1 1h | L2 Redis 7d）"""
+    from src.visualization.redis_cache import try_load
+    def compute():
+        try:
+            from src.analysis.ma5_above_ma10_duration import compute_duration_samples
+            return compute_duration_samples(DATA_DIR)
+        except Exception as e:
+            st.warning(f"计算 MA 多头时长失败：{e}")
+            return pd.DataFrame()
+    result, _hit = try_load("load_ma_duration_samples", fallback_fn=compute, ttl=86400 * 7)
+    return result
 
 
 @st.cache_data(ttl=3600)
 def load_name_map() -> dict:
     """
-    加载代码->公司名称映射（缓存 1 小时）。
+    加载代码->公司名称映射（L1 1h | L2 Redis 24h）。
 
     映射文件由 stock_price.py 生成并随 HF 同步。
     若文件不存在，返回空字典，看板回退到只显示代码。
     """
-    path = Path(DATA_DIR) / "code_name_map.parquet"
-    if not path.exists():
-        return {}
-    try:
-        df = pd.read_parquet(path)
-        return dict(zip(df["code"], df["code_name"]))
-    except Exception:
-        return {}
+    from src.visualization.redis_cache import try_load
+    def compute():
+        path = Path(DATA_DIR) / "code_name_map.parquet"
+        if not path.exists():
+            return {}
+        try:
+            df = pd.read_parquet(path)
+            return dict(zip(df["code"], df["code_name"]))
+        except Exception:
+            return {}
+    result, _hit = try_load("load_name_map", fallback_fn=compute, ttl=86400)
+    return result
 
 
 def format_stock_label(code: str, name_map: dict) -> str:
@@ -191,16 +230,51 @@ def jump_to_query(code: str, guard_key: str) -> None:
     if st.session_state.get(guard_key) == code:
         return
     st.session_state[guard_key] = code
-    st.session_state._goto_page = "个股查询"
+    st.session_state._goto_page = "个股"
     st.session_state.jump_code = code
     st.rerun()
 
 
 def push_recent(code: str) -> None:
-    """记录最近查看（会话级）。"""
+    """记录最近查看（会话 + Redis 持久化）。"""
     st.session_state.recent_codes = dedup_recent(
         st.session_state.get("recent_codes", []), code, RECENT_MAX
     )
+    _save_recent_code(code)
+
+
+def _save_recent_code(code: str) -> None:
+    """将股票代码写入 Redis ZSET（按时间戳排序，最多 20 条）。"""
+    import time
+    from src.visualization.redis_cache import get_redis
+    r = get_redis()
+    if r is None:
+        return
+    try:
+        r.zadd("v1:recent_codes", {code: time.time()})
+        r.zremrangebyrank("v1:recent_codes", 0, -21)
+    except Exception:
+        pass
+
+
+def _load_recent_codes() -> list:
+    """从 Redis 加载最近查看（最多 8 个，按时间倒序）。"""
+    from src.visualization.redis_cache import get_redis
+    r = get_redis()
+    if r is None:
+        return st.session_state.get("recent_codes", [])
+    try:
+        raw = r.zrevrange("v1:recent_codes", 0, 7)
+        codes = [c.decode() if isinstance(c, bytes) else c for c in raw]
+        # 同时同步到 session_state
+        st.session_state.recent_codes = dedup_recent([], codes[0], RECENT_MAX)
+        for c in codes[1:8]:
+            st.session_state.recent_codes = dedup_recent(
+                st.session_state.recent_codes, c, RECENT_MAX
+            )
+        return codes
+    except Exception:
+        return st.session_state.get("recent_codes", [])
 
 
 # 起始范围选项 → start_date 映射
@@ -349,14 +423,14 @@ def tab_market_overview():
     st.subheader("市场宽度")
     breadth = market_breadth(df_latest)
 
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
+    cols = kpi_columns(4)
+    with cols[0]:
         kpi_card("上涨家数", f"{breadth['up']:,}", tone="up")
-    with col2:
+    with cols[1]:
         kpi_card("下跌家数", f"{breadth['down']:,}", tone="down")
-    with col3:
+    with cols[2]:
         kpi_card("平盘家数", f"{breadth['flat']:,}", tone="neutral")
-    with col4:
+    with cols[3]:
         ratio_text = f"{breadth['ratio']:.2f}" if breadth["ratio"] != float("inf") else "∞"
         kpi_card("涨跌比", ratio_text, tone="primary")
 
@@ -383,7 +457,7 @@ def tab_market_overview():
             fillcolor="rgba(34,197,94,0.08)",
         ))
         fig.update_yaxes(title_text="累计收益率 (%)")
-        fig = apply_chart_theme(fig, height=400)
+        fig = apply_chart_theme(fig, height=chart_height(400))
         fig = add_range_selector(fig)
         st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
     else:
@@ -413,7 +487,7 @@ def tab_market_overview():
         ))
         fig.update_yaxes(title_text="家数")
         fig.update_layout(barmode="overlay", bargap=0.15)
-        fig = apply_chart_theme(fig, height=400, show_legend=True)
+        fig = apply_chart_theme(fig, height=chart_height(400), show_legend=True)
         fig = add_range_selector(fig)
         st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
     else:
@@ -444,16 +518,16 @@ def tab_ma_duration():
     max_d = int(dur.max())
 
     # KPI 卡
-    c1, c2, c3, c4, c5 = st.columns(5)
-    with c1:
+    cols = kpi_columns(5)
+    with cols[0]:
         kpi_card("样本总数", f"{n_total:,}", tone="primary")
-    with c2:
+    with cols[1]:
         kpi_card("中位时长", f"{median:.0f} 天", tone="neutral")
-    with c3:
+    with cols[2]:
         kpi_card("P90 时长", f"{p90:.0f} 天", tone="neutral")
-    with c4:
+    with cols[3]:
         kpi_card("最长", f"{max_d} 天", tone="neutral")
-    with c5:
+    with cols[4]:
         kpi_card("未结束", f"{n_ongoing:,}", tone="warn")
 
     st.write("")
@@ -492,7 +566,7 @@ def tab_ma_duration():
         annotation_text=f"P90 {p90:.0f}", annotation_position="top",
         annotation_font_color=COLORS["text_secondary"],
     )
-    fig = apply_chart_theme(fig, height=420, show_legend=True)
+    fig = apply_chart_theme(fig, height=chart_height(420), show_legend=True)
     event = st.plotly_chart(
         fig, width="stretch", on_select="rerun",
         key="ma_dur_chart", config={"displayModeBar": False},
@@ -536,20 +610,73 @@ def tab_ma_duration():
         jump_to_query(str(table.iloc[sel_rows[0]]["代码"]), "_ma_nav")
 
 
-def render_query_default(name_map: dict) -> None:
-    """个股查询未选股时的默认页：提示 + 最近查看（本会话浏览过的股票，可一键重开）。"""
-    st.info("请在上方输入关键词并从候选中选择股票，或点击下方「最近查看」快速打开。")
-
-    recent = st.session_state.get("recent_codes", [])
-    if not recent:
+def _render_stock_buttons(df, name_map: dict, prefix: str, *, show_amount: bool = False) -> None:
+    """渲染一组可点击的股票按钮（用于默认页 TOP 榜）。"""
+    if df.empty:
+        st.caption("暂无数据")
         return
-    st.subheader("最近查看")
-    cols = st.columns(4)
-    for i, c in enumerate(recent):
-        with cols[i % 4]:
-            if st.button(format_stock_label(c, name_map), key=f"recent_{c}", width="stretch"):
-                st.session_state.current_code = c
+    cols = kpi_columns(5)
+    for i, (_, row) in enumerate(df.iterrows()):
+        code = str(row.get("code", ""))
+        if not code:
+            continue
+        pct = float(row.get("pctChg", 0) or 0)
+        tone = "up" if pct > 0 else "down" if pct < 0 else "neutral"
+        label = format_stock_label(code, name_map)
+        if show_amount:
+            amount = float(row.get("amount", 0) or 0) / 1e8
+            btn_label = f"{label}\n{amount:.1f}亿"
+        else:
+            btn_label = f"{label}\n{pct:+.2f}%"
+        with cols[i % 5]:
+            if st.button(btn_label, key=f"def_{prefix}_{code}", width="stretch"):
+                st.session_state.current_code = code
                 st.rerun()
+
+
+def render_query_default(df_latest, name_map: dict) -> None:
+    """个股查询默认页：市场温度 + 异动关注 + 最近查看（持久化）。"""
+    # ---- 1. 今日市场温度 ----
+    breadth = market_breadth(df_latest)
+    latest_zt, latest_dt = 0, 0
+    limit_df = load_limit_up_down()
+    if not limit_df.empty:
+        last_row = limit_df.iloc[-1]
+        latest_zt = int(last_row.get("limit_up", 0))
+        latest_dt = int(last_row.get("limit_down", 0))
+
+    st.subheader("今日市场温度")
+    t_cols = kpi_columns(4)
+    with t_cols[0]:
+        kpi_card("上涨家数", f"{breadth['up']:,}", tone="up")
+    with t_cols[1]:
+        kpi_card("下跌家数", f"{breadth['down']:,}", tone="down")
+    with t_cols[2]:
+        kpi_card("涨停家数", f"{latest_zt}", tone="warn")
+    with t_cols[3]:
+        kpi_card("跌停家数", f"{latest_dt}", tone="info")
+
+    # ---- 2. 今日涨幅 TOP 5 ----
+    st.subheader("🔥 今日涨幅 TOP 5")
+    top_up = top_movers(df_latest, n=5, metric="pctChg", ascending=False)
+    _render_stock_buttons(top_up, name_map, "up")
+
+    # ---- 3. 今日成交 TOP 5 ----
+    st.subheader("💰 今日成交 TOP 5")
+    top_vol = top_movers(df_latest, n=5, metric="amount", ascending=False)
+    _render_stock_buttons(top_vol, name_map, "vol", show_amount=True)
+
+    # ---- 4. 最近查看（Redis 持久化，重启不丢） ----
+    recent = _load_recent_codes()
+    if recent:
+        st.subheader("🕐 最近查看")
+        r_cols = kpi_columns(4)
+        for i, c in enumerate(recent[:8]):
+            label = format_stock_label(c, name_map)
+            with r_cols[i % 4]:
+                if st.button(label, key=f"recent_{c}", width="stretch"):
+                    st.session_state.current_code = c
+                    st.rerun()
 
 
 # ========== Tab 2: 个股查询 ==========
@@ -587,7 +714,7 @@ def tab_stock_query():
     code = st.session_state.get("current_code")
 
     if not code:
-        render_query_default(name_map)
+        render_query_default(df_latest, name_map)
         return
 
     push_recent(code)  # 记入「最近查看」
@@ -614,21 +741,21 @@ def tab_stock_query():
     latest = df_k.iloc[-1]
     pct = float(latest.get("pctChg", 0) or 0)
     pct_tone = "up" if pct > 0 else "down" if pct < 0 else "neutral"
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
+    cols = kpi_columns(4)
+    with cols[0]:
         kpi_card(
             "最新价", f"{latest['close']:.2f}",
             delta=f"{pct:+.2f}%", delta_tone=pct_tone, tone="neutral",
         )
-    with col2:
+    with cols[1]:
         kpi_card("最高 / 最低", f"{latest['high']:.2f} / {latest['low']:.2f}", tone="neutral")
-    with col3:
+    with cols[2]:
         kpi_card("成交额", f"{latest.get('amount', 0) / 1e8:.2f} 亿", tone="neutral")
-    with col4:
+    with cols[3]:
         kpi_card("换手率", f"{latest.get('turn', 0):.2f}%", tone="neutral")
 
     # K线蜡烛图 + 均线 + 成交量副图
-    fig = build_kline_fig(df_k, n=n, height=600)
+    fig = build_kline_fig(df_k, n=n, height=chart_height(600))
     st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
 
     # 20 日滚动年化波动率曲线
@@ -644,7 +771,7 @@ def tab_stock_query():
             fill="tozeroy", fillcolor="rgba(59,130,246,0.08)",
         ))
         fig_vol.update_yaxes(title_text="波动率 (%)")
-        fig_vol = apply_chart_theme(fig_vol, height=300)
+        fig_vol = apply_chart_theme(fig_vol, height=chart_height(300))
         st.plotly_chart(fig_vol, width="stretch", config={"displayModeBar": False})
     except Exception as e:
         st.warning(f"无法加载波动率：{e}")
@@ -715,6 +842,9 @@ def tab_rankings():
         "turn": "换手率(%)",
     }).reset_index(drop=True)
 
+    # 移动端精简列
+    display_df = ranking_columns_df(display_df)
+
     st.caption("点击任意行跳转到「个股查询」查看该股详情")
     event = st.dataframe(
         style_ranking(display_df),
@@ -747,12 +877,12 @@ def tab_data_status():
     latest_date, days_ago = data_freshness(df_latest)
 
     # 数据统计（KPI 卡片）
-    col1, col2, col3 = st.columns(3)
-    with col1:
+    cols = kpi_columns(3)
+    with cols[0]:
         kpi_card("覆盖股票数", f"{len(df_latest):,}", tone="primary")
-    with col2:
+    with cols[1]:
         kpi_card("数据日期", latest_date, tone="neutral")
-    with col3:
+    with cols[2]:
         if days_ago is None:
             kpi_card("距今", "—", tone="neutral")
         else:
@@ -819,6 +949,8 @@ def render_sidebar(df_latest: pd.DataFrame) -> None:
         st.divider()
         if st.button("刷新数据", icon=":material/refresh:", width="stretch"):
             st.cache_data.clear()
+            from src.visualization.redis_cache import invalidate_all
+            invalidate_all()
             st.rerun()
         st.caption("数据源：HF `Charon107/stock-price`")
 
@@ -826,11 +958,11 @@ def render_sidebar(df_latest: pd.DataFrame) -> None:
 # ========== 主应用 ==========
 # 页面路由：名称 -> 渲染函数（顺序即导航顺序）
 PAGES = {
-    "大盘概览": tab_market_overview,
-    "个股查询": tab_stock_query,
-    "排行榜": tab_rankings,
-    "多头时长": tab_ma_duration,
-    "数据状态": tab_data_status,
+    "概览": tab_market_overview,
+    "个股": tab_stock_query,
+    "排行": tab_rankings,
+    "多头": tab_ma_duration,
+    "状态": tab_data_status,
 }
 
 
@@ -846,11 +978,11 @@ def main():
     # 规避 Streamlit「widget 实例化后不可修改其 session_state key」的限制。
     if "_goto_page" in st.session_state:
         st.session_state["nav"] = st.session_state.pop("_goto_page")
-    st.session_state.setdefault("nav", "大盘概览")
+    st.session_state.setdefault("nav", "概览")
     choice = st.segmented_control(
         "页面导航", list(PAGES), key="nav", label_visibility="collapsed",
     )
-    page = choice if choice in PAGES else "大盘概览"
+    page = choice if choice in PAGES else "概览"
     PAGES[page]()
 
 

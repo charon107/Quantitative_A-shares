@@ -17,6 +17,7 @@ dependencies = [
     "streamlit",
     "plotly",
     "streamlit-searchbox>=0.1.24",
+    "redis>=5.0.0,<6",
 ]
 
 [project.optional-dependencies]

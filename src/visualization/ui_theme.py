@@ -156,6 +156,87 @@ def inject_global_css() -> None:
         @media (prefers-reduced-motion: reduce) {{
             * {{ transition: none !important; animation: none !important; }}
         }}
+
+        /* ===== 响应式：平板 (768-1199px) ===== */
+        @media (max-width: 1199px) {{
+            .kpi-value {{ font-size: 24px; }}
+            .app-header .title {{ font-size: 22px; }}
+            .app-header {{ flex-direction: column; align-items: flex-start; gap: 8px; }}
+            [data-testid="stSegmentedControl"] {{
+                overflow-x: auto !important;
+                -webkit-overflow-scrolling: touch;
+            }}
+            [data-testid="stSegmentedControl"] > div {{
+                flex-wrap: nowrap !important;
+            }}
+            [data-testid="stSegmentedControl"] button {{
+                padding: 0 10px !important; font-size: 13px;
+                flex-shrink: 0 !important; white-space: nowrap !important;
+            }}
+        }}
+
+        /* ===== 响应式：手机 (<768px) ===== */
+        @media (max-width: 767px) {{
+            /* Streamlit 列纵向堆叠 */
+            [data-testid="stHorizontalBlock"] {{
+                flex-wrap: wrap !important; gap: 8px !important;
+            }}
+            [data-testid="stHorizontalBlock"] > [data-testid="column"] {{
+                flex: 0 0 100% !important; min-width: 100% !important;
+            }}
+
+            /* KPI 卡片紧凑化 */
+            .kpi-card {{ padding: 10px 12px; border-radius: 8px; }}
+            .kpi-value {{ font-size: 20px; }}
+            .kpi-label {{ font-size: 11px; }}
+            .kpi-delta {{ font-size: 11px; }}
+
+            /* Header 缩小 */
+            .app-header {{ padding: 0 0 10px; margin-bottom: 10px; }}
+            .app-header .title {{ font-size: 18px; }}
+            .app-header .title::before {{ width: 4px; height: 18px; }}
+            .app-header .subtitle {{ font-size: 11px; }}
+
+            /* 导航：横向滑动 */
+            [data-testid="stSegmentedControl"] {{
+                margin-bottom: 8px;
+                overflow-x: auto !important;
+                -webkit-overflow-scrolling: touch;
+            }}
+            [data-testid="stSegmentedControl"] > div {{
+                flex-wrap: nowrap !important;
+            }}
+            [data-testid="stSegmentedControl"] button {{
+                padding: 0 10px !important; font-size: 12px; height: 36px;
+                flex-shrink: 0 !important; white-space: nowrap !important;
+            }}
+
+            /* Badge 缩小 */
+            .badge {{ font-size: 10px; padding: 2px 6px; }}
+
+            /* 表格横向滚动 */
+            [data-testid="stDataFrame"] {{ overflow-x: auto !important; }}
+
+            /* 减小间距 */
+            .block-container {{ padding-top: 1.5rem; padding-bottom: 1.5rem; }}
+
+            /* 侧边栏 overlay（不挤占主内容） */
+            [data-testid="stSidebar"] {{
+                position: fixed !important;
+                top: 0; left: 0; height: 100vh; width: 85vw !important;
+                z-index: 999;
+            }}
+            /* 侧边栏展开时主内容区不位移 */
+            [data-testid="stAppViewContainer"] {{
+                margin-left: 0 !important;
+            }}
+            /* 确保关闭按钮可见 */
+            [data-testid="stSidebarCollapseButton"] button {{
+                background: {c['panel']} !important;
+                border: 1px solid {c['border']} !important;
+                border-radius: 8px;
+            }}
+        }}
         </style>
         """,
         unsafe_allow_html=True,
