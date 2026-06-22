@@ -16,6 +16,8 @@ from huggingface_hub import snapshot_download, HfApi
 # 配置：修改为你的 Hugging Face dataset 仓库地址
 REPO_ID = "Charon107/stock-price"
 LOCAL_DIR = "股价数据_parquet_fq"
+# 下载并发数（官方 HF 用 4 OK；hf-mirror.com 镜像限流严需 1）
+DOWNLOAD_WORKERS = int(os.environ.get("HF_DOWNLOAD_WORKERS", "4"))
 
 
 def download_from_hf():
@@ -36,7 +38,7 @@ def download_from_hf():
             repo_type="dataset",
             local_dir=LOCAL_DIR,
             token=hf_token,
-            max_workers=4,  # CF 限流严重，降到 4 并发（16→429 连发）
+            max_workers=DOWNLOAD_WORKERS,
         )
         print(f"[hf_sync] 下载完成，本地目录: {LOCAL_DIR}")
     except Exception as e:
