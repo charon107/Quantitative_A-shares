@@ -36,7 +36,7 @@ def download_from_hf():
             repo_type="dataset",
             local_dir=LOCAL_DIR,
             token=hf_token,
-            max_workers=16,  # 数据集是数千个小 parquet，提高并发缩短拉取时间
+            max_workers=4,  # CF 限流严重，降到 4 并发（16→429 连发）
         )
         print(f"[hf_sync] 下载完成，本地目录: {LOCAL_DIR}")
     except Exception as e:
