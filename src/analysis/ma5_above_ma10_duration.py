@@ -1,12 +1,12 @@
 """
-MA5 > MA10 持续时长分布统计（一次性分析脚本）
+MA5 > MA20 持续时长分布统计（一次性分析脚本）
 
 口径：
-- 对全市场每只股票按收盘价算 MA5/MA10。
-- 一个「样本」= MA5 从 ≤ 上穿 MA10 到回落的一段完整金叉区间，
+- 对全市场每只股票按收盘价算 MA5/MA20。
+- 一个「样本」= MA5 从 ≤ 上穿 MA20 到回落的一段完整金叉区间，
   且**上穿日 >= START_DATE**（2025-01-01 时已在持续中的区间属左截断，不计入）。
-- 时长 = 该区间内 MA5 > MA10 的交易日数（严格 >，相等即区间结束）。
-- 一直延伸到**全市场最新交易日**（MA5 仍 > MA10）的区间标 ongoing=True，
+- 时长 = 该区间内 MA5 > MA20 的交易日数（严格 >，相等即区间结束）。
+- 一直延伸到**全市场最新交易日**（MA5 仍 > MA20）的区间标 ongoing=True，
   仍计入分布，但时长仅为下限（右删失）。停牌/退市导致序列提前结束的末段
   不算 ongoing（其 end_date < 市场最新日），改判为已结束。
 
@@ -36,9 +36,9 @@ KLINE_SUBDIR = "kline_fq"
 
 START_DATE = "2025-01-01"   # 只计入上穿日 >= 此日期的样本
 MA_SHORT = 5
-MA_LONG = 10
+MA_LONG = 20
 
-OUT_DIR = "ma5_ma10_duration_out"
+OUT_DIR = "ma5_ma20_duration_out"
 OUT_DETAIL_CSV = "samples_detail.csv"
 OUT_SUMMARY_CSV = "duration_summary.csv"
 OUT_HIST_PNG = "duration_hist.png"
@@ -76,27 +76,27 @@ def add_ma(df: pd.DataFrame, short: int = MA_SHORT, long: int = MA_LONG) -> pd.D
     """用收盘价计算 MA{short}/MA{long}（不足窗口的行为 NaN）。"""
     df = df.copy()
     df["MA5"] = df["close"].rolling(short, min_periods=short).mean()
-    df["MA10"] = df["close"].rolling(long, min_periods=long).mean()
+    df["MA20"] = df["close"].rolling(long, min_periods=long).mean()
     return df
 
 
 def extract_samples(df: pd.DataFrame, code: str, start_date) -> list[dict]:
     """
-    从含 MA5/MA10 的 df 中抽取「MA5 > MA10 连续区间」样本。
+    从含 MA5/MA20 的 df 中抽取「MA5 > MA20 连续区间」样本。
 
     仅保留**上穿日 >= start_date** 的完整金叉区间（排除左截断）。
     延伸到序列末尾的区间标 ongoing=True（右删失，时长为下限）。
 
     返回 list[dict]：{code, start_date, end_date, duration, ongoing}
     """
-    if df.empty or "MA5" not in df.columns or "MA10" not in df.columns:
+    if df.empty or "MA5" not in df.columns or "MA20" not in df.columns:
         return []
 
     start_ts = pd.Timestamp(start_date)
 
-    # 严格 >；NaN（前 long-1 日无 MA10）视为 False，不会误判区间起点
-    above = (df["MA5"] > df["MA10"]).to_numpy()
-    above = np.where(np.isnan(df["MA5"].to_numpy()) | np.isnan(df["MA10"].to_numpy()),
+    # 严格 >；NaN（前 long-1 日无 MA20）视为 False，不会误判区间起点
+    above = (df["MA5"] > df["MA20"]).to_numpy()
+    above = np.where(np.isnan(df["MA5"].to_numpy()) | np.isnan(df["MA20"].to_numpy()),
                      False, above)
 
     n = len(above)
@@ -241,7 +241,7 @@ def plot_histogram(detail: pd.DataFrame, out_path: Path) -> None:
     ax.axvline(p90, color="#C084FC", ls=":", lw=1.2, label=f"P90 {p90:.0f}天")
 
     ax.set_title(
-        f"MA5>MA10 持续时长分布（{START_DATE} 起，共 {len(detail)} 个样本，"
+        f"MA5>MA20 持续时长分布（{START_DATE} 起，共 {len(detail)} 个样本，"
         f"其中 {int(detail['ongoing'].sum())} 个未结束）",
         color="#F8FAFC", fontsize=12, pad=12,
     )

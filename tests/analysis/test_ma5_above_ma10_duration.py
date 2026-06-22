@@ -1,11 +1,11 @@
 """
 单元测试：ma5_above_ma10_duration.extract_samples（核心区间抽取纯函数）
 
-直接喂入构造好的 MA5/MA10，绕过 add_ma，聚焦：
+直接喂入构造好的 MA5/MA20，绕过 add_ma，聚焦：
 - 完整金叉区间的识别与时长
 - 左截断（上穿日 < START_DATE）剔除
 - 右删失（延伸到序列末尾）标 ongoing
-- 严格 > 边界（MA5==MA10 断开区间）
+- 严格 > 边界（MA5==MA20 断开区间）
 - NaN（无 MA10 的早期）不误判
 """
 import numpy as np
@@ -16,12 +16,12 @@ from src.analysis.ma5_above_ma10_duration import extract_samples, apply_strict_o
 START = "2025-01-01"
 
 
-def _df(dates, ma5, ma10):
-    """用显式 MA5/MA10 构造 df（AAA 的 Arrange 辅助）。"""
+def _df(dates, ma5, ma20):
+    """用显式 MA5/MA20 构造 df（AAA 的 Arrange 辅助）。"""
     return pd.DataFrame({
         "date": pd.to_datetime(dates),
         "MA5": ma5,
-        "MA10": ma10,
+        "MA20": ma20,
     })
 
 
@@ -31,7 +31,7 @@ class TestExtractSamples:
         df = _df(
             ["2025-01-01", "2025-01-02", "2025-01-03", "2025-01-06", "2025-01-07", "2025-01-08"],
             ma5=[9, 11, 12, 11, 9, 9],
-            ma10=[10, 10, 10, 10, 10, 10],
+            ma20=[10, 10, 10, 10, 10, 10],
         )
         out = extract_samples(df, "sh.600000", START)
         assert len(out) == 1
@@ -47,7 +47,7 @@ class TestExtractSamples:
         df = _df(
             ["2024-12-30", "2024-12-31", "2025-01-02", "2025-01-03"],
             ma5=[11, 12, 12, 9],
-            ma10=[10, 10, 10, 10],
+            ma20=[10, 10, 10, 10],
         )
         out = extract_samples(df, "sz.000001", START)
         assert out == []
@@ -57,7 +57,7 @@ class TestExtractSamples:
         df = _df(
             ["2025-03-01", "2025-03-02", "2025-03-03"],
             ma5=[9, 11, 12],
-            ma10=[10, 10, 10],
+            ma20=[10, 10, 10],
         )
         out = extract_samples(df, "sh.600001", START)
         assert len(out) == 1
@@ -66,11 +66,11 @@ class TestExtractSamples:
         assert out[0]["start_date"] == "2025-03-02"
 
     def test_strict_greater_breaks_run(self):
-        """MA5==MA10 当日不算区间内，区间在此断开为两段。"""
+        """MA5==MA20 当日不算区间内，区间在此断开为两段。"""
         df = _df(
             ["2025-05-01", "2025-05-02", "2025-05-05", "2025-05-06", "2025-05-07"],
             ma5=[11, 10, 11, 11, 9],   # 第 2 日相等
-            ma10=[10, 10, 10, 10, 10],
+            ma20=[10, 10, 10, 10, 10],
         )
         out = extract_samples(df, "sh.600002", START)
         durations = sorted(s["duration"] for s in out)
@@ -84,7 +84,7 @@ class TestExtractSamples:
         df = _df(
             ["2025-02-01", "2025-02-02", "2025-02-03"],
             ma5=[np.nan, 11, 12],
-            ma10=[np.nan, 10, 10],
+            ma20=[np.nan, 10, 10],
         )
         out = extract_samples(df, "sh.600003", START)
         assert len(out) == 1

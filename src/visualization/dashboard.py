@@ -125,7 +125,7 @@ def load_limit_up_down():
 
 @st.cache_data(ttl=3600)
 def load_ma_duration_samples():
-    """加载 MA5>MA10 金叉区间样本（L1 1h | L2 Redis 7d）"""
+    """加载 MA5>MA20 金叉区间样本（L1 1h | L2 Redis 7d）"""
     from src.visualization.redis_cache import try_load
     def compute():
         try:
@@ -494,13 +494,13 @@ def tab_market_overview():
         st.info("涨停/跌停数据不足")
 
 
-# ========== Tab: 多头时长 (MA5>MA10) ==========
+# ========== Tab: 多头时长 (MA5>MA20) ==========
 def tab_ma_duration():
-    """多头时长 tab：全市场 MA5>MA10 金叉区间的持续时长分布（KPI + 直方图）。"""
+    """多头时长 tab：全市场 MA5>MA20 金叉区间的持续时长分布（KPI + 直方图）。"""
     st.header("多头时长")
     st.caption(
-        "口径：按收盘价算 MA5/MA10，每段 MA5 > MA10 的连续交易日为一个样本，"
-        "上穿日 ≥ 2025-01-01；「未结束」= 截至最新交易日 MA5 仍 > MA10（时长为下限）。"
+        "口径：按收盘价算 MA5/MA20，每段 MA5 > MA20 的连续交易日为一个样本，"
+        "上穿日 ≥ 2025-01-01；「未结束」= 截至最新交易日 MA5 仍 > MA20（时长为下限）。"
     )
 
     with st.spinner("统计全市场 MA 多头时长中…（首次约需数十秒）"):

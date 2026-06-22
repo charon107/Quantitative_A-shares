@@ -4,7 +4,7 @@
 用 tmp_path 写两只迷你股票，验证：
 - 全市场遍历 + MA 计算 + 区间抽取 串起来产出正确样本；
 - 跨股票的市场级 ongoing 收紧：只有 end_date == 全市场最新交易日 的样本才算未结束，
-  数据提前结束（停牌/退市）的股票即使末段仍 MA5>MA10 也被改判已结束。
+  数据提前结束（停牌/退市）的股票即使末段仍 MA5>MA20 也被改判已结束。
 """
 import pandas as pd
 
@@ -28,15 +28,15 @@ class TestComputeDurationSamples:
 
     def test_cross_stock_strict_ongoing(self, tmp_path):
         """
-        LATE：14 个交易日、末段持续上涨到最后一根 → end_date==市场最新日 → ongoing=True。
-        EARLY：12 个交易日（更早结束）、末段同样上涨 → 但 end_date<市场最新日 → 收紧为 ongoing=False。
-        前 10 日恒为 10（MA5==MA10 不算区间），第 11 日起上涨触发金叉。
+        LATE：24 个交易日、末段持续上涨到最后一根 → end_date==市场最新日 → ongoing=True。
+        EARLY：22 个交易日（更早结束）、末段同样上涨 → 但 end_date<市场最新日 → 收紧为 ongoing=False。
+        前 20 日恒为 10（MA5==MA20 不算区间），第 21 日起上涨触发金叉。
         """
         kline_dir = tmp_path / "kline_fq"
         kline_dir.mkdir()
-        # 恒定 10 暖机 10 天，随后逐日上涨制造 MA5 上穿 MA10
-        _write_kline(kline_dir, "sh.000001", [10] * 10 + [11, 12, 13, 14])  # LATE: 14 根
-        _write_kline(kline_dir, "sz.000002", [10] * 10 + [11, 12])          # EARLY: 12 根
+        # 恒定 10 暖机 20 天，随后逐日上涨制造 MA5 上穿 MA20
+        _write_kline(kline_dir, "sh.000001", [10] * 20 + [11, 12, 13, 14])  # LATE: 24 根
+        _write_kline(kline_dir, "sz.000002", [10] * 20 + [11, 12])          # EARLY: 22 根
 
         out = compute_duration_samples(str(tmp_path))
 
