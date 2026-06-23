@@ -1,11 +1,12 @@
 import os
+import sys
 import json
 import time
 import random
-import atexit
+import signal
 import hashlib
 from datetime import datetime, timedelta
-from concurrent.futures import ProcessPoolExecutor
+from multiprocessing.pool import Pool
 
 import baostock as bs
 import pandas as pd
@@ -486,12 +487,21 @@ def update_one_stock(code: str, factor_check_start: str,
     }
 
 
+_active_pool: "Pool | None" = None
+
+
+def _sigterm_handler(signum, frame):
+    """收到 SIGTERM（GitHub Actions 手动取消）时立即终止所有 worker，避免孤儿进程。"""
+    if _active_pool is not None:
+        _active_pool.terminate()
+    sys.exit(128 + signum)
+
+
 def _pool_init():
-    """每个 worker 进程启动时登录一次 baostock，进程退出时登出。"""
+    """每个 worker 进程启动时登录一次 baostock。OS 关闭进程时连接自动断开，无需 atexit logout。"""
     lg = bs.login()
     if lg.error_code != "0":
         raise RuntimeError(f"baostock login failed in worker: {lg.error_msg}")
-    atexit.register(bs.logout)
 
 
 def _update_task(args):
@@ -596,10 +606,16 @@ def main():
     factor_checked_count = 0
 
     # -------- 多进程并行更新每只股票（每进程独立 baostock 登录）--------
+    # 注册 SIGTERM 处理器：GitHub Actions 手动取消时发 SIGTERM，立即 terminate() pool，
+    # 避免 worker 进程成为孤儿（worker 被 SIGTERM 杀死，不触发 atexit，连接由 OS 关闭）。
+    signal.signal(signal.SIGTERM, _sigterm_handler)
+
+    global _active_pool
     tasks = [(code, factor_check_start, factor_check_dates) for code in codes]
-    with ProcessPoolExecutor(max_workers=WORKERS, initializer=_pool_init) as ex:
+    with Pool(processes=WORKERS, initializer=_pool_init) as pool:
+        _active_pool = pool
         for r in tqdm(
-            ex.map(_update_task, tasks, chunksize=CHUNKSIZE),
+            pool.imap(_update_task, tasks, chunksize=CHUNKSIZE),
             total=len(tasks),
             desc="Updating HS Mainboard (front-adjusted)",
         ):
@@ -626,6 +642,7 @@ def main():
             if r.get("factor_checked"):
                 factor_check_dates[r["code"]] = today_str
                 factor_checked_count += 1
+    _active_pool = None
 
     # -------- 持久化 --------
     save_factor_check_dates(factor_check_dates)
@@ -646,7 +663,6 @@ def main():
 
 
 if __name__ == "__main__":
-    import sys
     if len(sys.argv) > 1 and sys.argv[1] == "name-map":
         # 轻量模式：只生成代码->名称映射，不拉取K线
         build_name_map_only()
