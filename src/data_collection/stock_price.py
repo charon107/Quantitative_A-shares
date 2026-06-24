@@ -61,6 +61,13 @@ FACTOR_CHECK_DATES_PATH = os.path.join(BASE_DIR, "factor_check_dates.parquet")
 # 开盘日快速跳过：抽查几只代表性股票确认是否有新交易日
 QUICK_CHECK_COUNT = int(os.environ.get("BAOSTOCK_QUICK_CHECK", "2"))
 
+# 黑名单封禁后的冷却时长（小时）：期间的 run 直接跳过，不再触发 baostock 请求
+BLACKLIST_COOLDOWN_HOURS = float(os.environ.get("BAOSTOCK_BLACKLIST_COOLDOWN_HOURS", "6"))
+
+
+class BaostockBlacklistedError(RuntimeError):
+    """baostock 返回全局性永久封禁错误（如"黑名单用户"），重试无意义，需立即熔断。"""
+
 # =========================
 # 路径区
 # =========================
@@ -281,6 +288,8 @@ def fetch_kline_fq(code: str, start_date: str, end_date: str = "") -> pd.DataFra
             df = df.sort_values(["date"]).drop_duplicates(subset=["date"], keep="last").reset_index(drop=True)
             return df
         except Exception as e:
+            if "黑名单" in str(e):
+                raise BaostockBlacklistedError(str(e)) from e
             last_err = e
             if attempt < MAX_RETRIES:
                 wait = min(BACKOFF_CAP, (BACKOFF_BASE ** (attempt - 1)) + random.uniform(0, 1.5))
@@ -309,6 +318,8 @@ def fetch_adjust_factor(code: str, start_date: str, end_date: str = "") -> pd.Da
                 df["dividOperateDate"] = pd.to_datetime(df["dividOperateDate"], errors="coerce")
             return df
         except Exception as e:
+            if "黑名单" in str(e):
+                raise BaostockBlacklistedError(str(e)) from e
             last_err = e
             if attempt < MAX_RETRIES:
                 wait = min(BACKOFF_CAP, (BACKOFF_BASE ** (attempt - 1)) + random.uniform(0, 1.5))
@@ -505,13 +516,27 @@ def _pool_init():
 
 
 def _update_task(args):
-    """进程池任务：更新单只股票，异常转成 ERROR 结果而非抛出（避免拖垮整个池）。"""
+    """进程池任务：更新单只股票，异常转成 ERROR 结果而非抛出（避免拖垮整个池）。
+
+    黑名单封禁单独标记为 BLACKLISTED，供主进程识别并立即熔断整个 run。
+    """
     code, factor_check_start, factor_check_dates = args
     try:
         return update_one_stock(code, factor_check_start=factor_check_start,
                                 factor_check_dates=factor_check_dates)
+    except BaostockBlacklistedError as e:
+        return {"code": code, "mode": "BLACKLISTED", "error": str(e)}
     except Exception as e:
         return {"code": code, "mode": "ERROR", "error": str(e)}
+
+
+def _trip_blacklist_breaker(state: dict, error_msg: str):
+    """检测到 baostock 全局黑名单封禁：记录冷却期截止时间，供后续 run 快速跳过。"""
+    cooldown_until = datetime.now() + timedelta(hours=BLACKLIST_COOLDOWN_HOURS)
+    state["blacklisted_until"] = cooldown_until.isoformat()
+    save_state(state)
+    print(f"[Blacklist] baostock 返回黑名单错误，立即停止本次运行：{error_msg}")
+    print(f"[Blacklist] 冷却至 {cooldown_until.isoformat()} 前，期间的 run 将自动跳过。")
 
 
 def _get_latest_local_date(codes: list[str], sample_size: int = 50) -> str | None:
@@ -548,6 +573,8 @@ def _quick_check_latest_market_date(codes: list[str]) -> str | None:
             if not df.empty and "date" in df.columns:
                 dmax = df["date"].max().strftime("%Y-%m-%d")
                 latest_dates.append(dmax)
+        except BaostockBlacklistedError:
+            raise
         except Exception:
             pass
     if not latest_dates:
@@ -558,6 +585,12 @@ def _quick_check_latest_market_date(codes: list[str]) -> str | None:
 def main():
     ensure_dirs()
     state = load_state()
+
+    # -------- 黑名单冷却期检查：命中过封禁时，本次直接跳过，不再触发任何 baostock 请求 --------
+    cooldown_until = state.get("blacklisted_until")
+    if cooldown_until and datetime.now() < datetime.fromisoformat(cooldown_until):
+        print(f"[Skip] baostock 黑名单冷却期内（至 {cooldown_until}），本次不再尝试。")
+        return
 
     # -------- 主进程登录一次：仅用于拉股票列表 + 刷新名称映射 --------
     lg = bs.login()
@@ -593,6 +626,9 @@ def main():
                     state["last_run"] = datetime.today().strftime("%Y-%m-%d %H:%M:%S")
                     save_state(state)
                     return
+            except BaostockBlacklistedError as e:
+                _trip_blacklist_breaker(state, str(e))
+                sys.exit(1)
             finally:
                 bs.logout()
 
@@ -626,7 +662,15 @@ def main():
             desc="Updating HS Mainboard (front-adjusted)",
         ):
             mode = r["mode"]
-            if mode == "ERROR":
+            if mode == "BLACKLISTED":
+                pool.terminate()
+                if r.get("factor_checked"):
+                    factor_check_dates[r["code"]] = today_str
+                save_factor_check_dates(factor_check_dates)
+                _trip_blacklist_breaker(state, r.get("error"))
+                _active_pool = None
+                sys.exit(1)
+            elif mode == "ERROR":
                 stats["ERROR"] += 1
                 errors.append((r.get("code"), r.get("error")))
             elif mode == "FULL_REBUILD":
