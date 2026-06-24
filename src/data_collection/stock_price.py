@@ -515,9 +515,15 @@ def _update_task(args):
 
 
 def _get_latest_local_date(codes: list[str], sample_size: int = 50) -> str | None:
-    """抽样检查本地 kline 文件的最晚日期。"""
+    """随机抽样检查本地 kline 文件的最晚日期，取最小值。
+
+    上次运行若被中途取消，只有按 code 顺序排在前面的一批股票会被更新，
+    若固定抽前缀 + 取 max，会被这批"恰好更新过"的股票误判为全量已最新。
+    随机抽样 + 取 min 可以避免命中这种不均匀更新的局部样本。
+    """
+    sample = random.sample(codes, min(sample_size, len(codes)))
     all_dates = []
-    for code in codes[:min(sample_size, len(codes))]:
+    for code in sample:
         k_path = os.path.join(DATA_DIR, f"{code}.parquet")
         existing = read_parquet_if_exists(k_path)
         d = get_last_date(existing)
@@ -525,12 +531,12 @@ def _get_latest_local_date(codes: list[str], sample_size: int = 50) -> str | Non
             all_dates.append(d)
     if not all_dates:
         return None
-    return max(all_dates)
+    return min(all_dates)
 
 
 def _quick_check_latest_market_date(codes: list[str]) -> str | None:
-    """抽查几只代表性股票，从 baostock 确认最新可用的交易日。"""
-    check_codes = codes[:min(QUICK_CHECK_COUNT, len(codes))]
+    """随机抽查几只代表性股票，从 baostock 确认最新可用的交易日。"""
+    check_codes = random.sample(codes, min(QUICK_CHECK_COUNT, len(codes)))
     latest_dates = []
     for code in check_codes:
         try:
