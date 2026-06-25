@@ -19,8 +19,8 @@ jobs:
     # 关掉后回退到稳定的 https 下载/上传（download 与 upload 步骤都生效）。
     env:
       HF_HUB_DISABLE_XET: "1"
-      # baostock 并行抓取进程数（被限流报错就调小）
-      BAOSTOCK_WORKERS: "8"
+      # tushare 并行抓取进程数（按积分分级限频，2000+ 积分档保守设置，被限流报错就调小）
+      TUSHARE_WORKERS: "4"
 
     steps:
       - uses: actions/checkout@v4
@@ -36,6 +36,8 @@ jobs:
         run: uv run python -m src.data_collection.hf_sync download
 
       - name: Run incremental stock data update
+        env:
+          TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
         run: uv run python src/data_collection/stock_price.py
 
       - name: Upload updated data to HF

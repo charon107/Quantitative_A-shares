@@ -10,7 +10,7 @@ WechatNum/
 │   ├── data_collection/     # 数据采集
 │   │   ├── wechat_index.py      # 微信指数批量爬取（自动增量更新）
 │   │   ├── wechat_index_gui.py  # 微信指数爬取（原版/GUI）
-│   │   ├── stock_price.py       # A股日线前复权 K线更新（baostock）
+│   │   ├── stock_price.py       # A股日线前复权 K线更新（tushare）
 │   │   ├── limit_up_updater.py  # 涨停池更新（akshare，追加到 data/limit_up/）
 │   │   └── limit_up_history.py  # 历史涨停生成（从 parquet 扫描）
 │   ├── strategies/          # 交易策略回测
@@ -102,5 +102,4 @@ search_key = <你的search_key>
 ## 注意事项
 
 - 所有脚本需从**项目根目录**运行（保证相对路径正确）
-- baostock 已针对 pandas 2.x 打 patch（`df.append` → `pd.concat`）
 - 微信指数凭证不入 git，仅存 `config/wechat_search_config.ini`（已加入 .gitignore）

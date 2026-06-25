@@ -2,6 +2,8 @@ import os
 import glob
 import pandas as pd
 
+from src.data_collection import tushare_client as tsc
+
 
 # ================== 参数 ==================
 DATA_DIR = "沪深主板微信指数"
@@ -166,7 +168,6 @@ def to_baostock_code(code6: str) -> str:
 
 
 def daily_pct_change_ok_with_baostock(
-    bs,
     code6: str,
     target_date: pd.Timestamp,
     max_drop: float = MAX_DAILY_DROP,   # 最大允许跌幅（正数，比如 0.05）
@@ -183,26 +184,9 @@ def daily_pct_change_ok_with_baostock(
     start = (target_date - pd.Timedelta(days=30)).strftime("%Y-%m-%d")
     end = (target_date + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
 
-    rs = bs.query_history_k_data_plus(
-        bs_code,
-        fields="date,close",
-        start_date=start,
-        end_date=end,
-        frequency="d",
-        adjustflag=adjustflag
-    )
-    if rs.error_code != "0":
+    hist = tsc.fetch_kline_qfq(bs_code, start_date=start, end_date=end, fields=["date", "close"])
+    if hist.empty:
         return False
-
-    rows = []
-    while rs.next():
-        rows.append(rs.get_row_data())
-    if not rows:
-        return False
-
-    hist = pd.DataFrame(rows, columns=rs.fields)
-    hist["date"] = pd.to_datetime(hist["date"], errors="coerce")
-    hist["close"] = pd.to_numeric(hist["close"], errors="coerce")
     hist = hist.dropna(subset=["date", "close"]).sort_values("date").reset_index(drop=True)
 
     w = hist[hist["date"] <= target_date].tail(2).reset_index(drop=True)
@@ -219,7 +203,6 @@ def daily_pct_change_ok_with_baostock(
 
 
 def prevN_price_range_ok_with_baostock(
-    bs,
     code6: str,
     target_date: pd.Timestamp,
     n_days: int = 7,
@@ -238,27 +221,9 @@ def prevN_price_range_ok_with_baostock(
     start = (target_date - pd.Timedelta(days=60)).strftime("%Y-%m-%d")
     end = (target_date + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
 
-    rs = bs.query_history_k_data_plus(
-        bs_code,
-        fields="date,high,low",
-        start_date=start,
-        end_date=end,
-        frequency="d",
-        adjustflag=adjustflag
-    )
-    if rs.error_code != "0":
+    hist = tsc.fetch_kline_qfq(bs_code, start_date=start, end_date=end, fields=["date", "high", "low"])
+    if hist.empty:
         return False
-
-    rows = []
-    while rs.next():
-        rows.append(rs.get_row_data())
-    if not rows:
-        return False
-
-    hist = pd.DataFrame(rows, columns=rs.fields)
-    hist["date"] = pd.to_datetime(hist["date"], errors="coerce")
-    hist["high"] = pd.to_numeric(hist["high"], errors="coerce")
-    hist["low"] = pd.to_numeric(hist["low"], errors="coerce")
     hist = hist.dropna(subset=["date", "high", "low"]).sort_values("date").reset_index(drop=True)
 
     w = hist[hist["date"] < target_date].tail(n_days).reset_index(drop=True)
@@ -282,7 +247,6 @@ def prevN_price_range_ok_with_baostock(
 
 
 def calc_forward_hit_rate_with_baostock(
-    bs,
     result_df: pd.DataFrame,
     target_date: pd.Timestamp,
     fwd_days: int = 10,
@@ -320,28 +284,12 @@ def calc_forward_hit_rate_with_baostock(
         code6 = str(getattr(row, "code")).zfill(6)
         bs_code = to_baostock_code(code6)
 
-        rs = bs.query_history_k_data_plus(
-            bs_code,
-            fields="date,code,close,high,low",
-            start_date=start,
-            end_date=end,
-            frequency="d",
-            adjustflag=adjustflag
+        hist = tsc.fetch_kline_qfq(
+            bs_code, start_date=start, end_date=end,
+            fields=["date", "code", "close", "high", "low"],
         )
-        if rs.error_code != "0":
+        if hist.empty:
             continue
-
-        data_list = []
-        while rs.next():
-            data_list.append(rs.get_row_data())
-        if not data_list:
-            continue
-
-        hist = pd.DataFrame(data_list, columns=rs.fields)
-        hist["date"] = pd.to_datetime(hist["date"], errors="coerce")
-        hist["close"] = pd.to_numeric(hist["close"], errors="coerce")
-        hist["high"] = pd.to_numeric(hist["high"], errors="coerce")
-        hist["low"] = pd.to_numeric(hist["low"], errors="coerce")
         hist = hist.dropna(subset=["date", "close", "high", "low"]).sort_values("date").reset_index(drop=True)
 
         after = hist[hist["date"] > target_date]
@@ -426,235 +374,199 @@ def summarize_by_condition(df: pd.DataFrame, cond_col: str) -> dict:
     }
 
 
-def get_trading_days_from_baostock(bs, start_date: str, end_date: str) -> list[pd.Timestamp]:
-    rs = bs.query_trade_dates(start_date=start_date, end_date=end_date)
-    if rs.error_code != "0":
-        raise RuntimeError(f"query_trade_dates 失败：{rs.error_code} {rs.error_msg}")
-
-    rows = []
-    while rs.next():
-        rows.append(rs.get_row_data())
-    if not rows:
-        return []
-
-    df = pd.DataFrame(rows, columns=rs.fields)
-    date_col = "calendar_date" if "calendar_date" in df.columns else "date"
-    flag_col = "is_trading_day" if "is_trading_day" in df.columns else "is_trading_day"
-
-    df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
-    df = df.dropna(subset=[date_col])
-
-    if flag_col in df.columns:
-        df = df[df[flag_col].astype(str) == "1"]
-
-    return sorted(df[date_col].dt.normalize().tolist())
+def get_trading_days_from_baostock(start_date: str, end_date: str) -> list[pd.Timestamp]:
+    return [d.normalize() for d in tsc.fetch_trade_dates(start_date, end_date)]
 
 
 def main():
-    # ---- baostock：登录一次 ----
-    try:
-        import baostock as bs
-    except Exception as e:
-        raise RuntimeError("未能导入 baostock，请先 pip install baostock") from e
+    # 1) 获取交易日
+    trading_days = get_trading_days_from_baostock(MONTH_START, MONTH_END)
+    if not trading_days:
+        raise RuntimeError("未获取到交易日，请检查 MONTH_START/MONTH_END 或 tushare 接口返回。")
 
-    lg = bs.login()
-    if lg.error_code != "0":
-        raise RuntimeError(f"baostock login 失败：{lg.error_code} {lg.error_msg}")
+    # 2) 预加载所有 parquet（避免每个交易日重复读盘）
+    paths = sorted(glob.glob(os.path.join(DATA_DIR, "*.parquet")))
+    if not paths:
+        raise RuntimeError("目录下未找到 parquet 文件")
 
-    try:
-        # 1) 获取交易日
-        trading_days = get_trading_days_from_baostock(bs, MONTH_START, MONTH_END)
-        if not trading_days:
-            raise RuntimeError("未获取到交易日，请检查 MONTH_START/MONTH_END 或 baostock 接口返回。")
+    cache = {}  # code -> df
+    for p in tqdm(paths, desc="Loading parquet", leave=False):
+        try:
+            df = load_one_parquet(p)
+            if df.empty:
+                continue
+            if "code" not in df.columns:
+                continue
+            code6 = str(df["code"].iloc[-1]).zfill(6)
+            cache[code6] = df
+        except Exception:
+            continue
 
-        # 2) 预加载所有 parquet（避免每个交易日重复读盘）
-        paths = sorted(glob.glob(os.path.join(DATA_DIR, "*.parquet")))
-        if not paths:
-            raise RuntimeError("目录下未找到 parquet 文件")
+    if not cache:
+        raise RuntimeError("未能从 parquet 加载到任何有效数据（缺少 code/date/wechat_index？）")
 
-        cache = {}  # code -> df
-        for p in tqdm(paths, desc="Loading parquet", leave=False):
+    # 3) 逐交易日跑入池 + 回测 + 统计
+    all_pools = []
+    all_details = []
+    daily_summaries = []
+
+    for target_date in tqdm(trading_days, desc="Processing trading days"):
+        target_date = pd.to_datetime(target_date)
+
+        pool = []
+        items = list(cache.items())
+        for code6, df in tqdm(items, total=len(items), desc=f"{target_date.date()} scan", leave=False):
             try:
-                df = load_one_parquet(p)
-                if df.empty:
+                prev_df, target_row = pick_window(df, target_date, LOOKBACK)
+                if target_row is None or prev_df is None:
                     continue
-                if "code" not in df.columns:
+
+                passed, reasons = check_conditions(
+                    df_full=df,
+                    prev_df=prev_df,
+                    target_row=target_row,
+                    active_conditions=ACTIVE_CONDITIONS,
+                    c4_lookback_days=C4_LOOKBACK_DAYS,
+                )
+                if not passed:
                     continue
-                code6 = str(df["code"].iloc[-1]).zfill(6)
-                cache[code6] = df
+
+                # 对所有启用条件都生效 —— target_date 当日涨跌幅区间约束
+                pct_ok = daily_pct_change_ok_with_baostock(
+                    code6=code6,
+                    target_date=target_date,
+                    max_drop=MAX_DAILY_DROP,
+                    max_rise=MAX_DAILY_RISE,
+                    adjustflag=ADJUSTFLAG,
+                )
+                if not pct_ok:
+                    continue
+
+                # 价格约束：只要 reason 里有 C2/C3/C4，就检查；不通过就移除这些 reason
+                need_price_filter = any(
+                    r.startswith(("C2:", "C3:", "C4:")) for r in reasons
+                )
+                if need_price_filter:
+                    price_ok = prevN_price_range_ok_with_baostock(
+                        code6=code6,
+                        target_date=target_date,
+                        n_days=PRICE_LOOKBACK,
+                        threshold=PRICE_RANGE_MAX,
+                        adjustflag=ADJUSTFLAG,
+                    )
+                    if not price_ok:
+                        reasons = [r for r in reasons if not r.startswith(("C2:", "C3:", "C4:"))]
+
+                if not reasons:
+                    continue
+
+                pool.append({
+                    "target_date": target_date.date(),
+                    "code": str(target_row["code"]).zfill(6),
+                    "name": target_row.get("name", ""),
+                    "target_index": target_row.get("wechat_index"),
+                    "prev5_mean": prev_df["wechat_index"].mean(),
+                    "prev5_min": prev_df["wechat_index"].min(),
+                    "prev5_max": prev_df["wechat_index"].max(),
+                    "reason": "; ".join(reasons),
+                })
             except Exception:
                 continue
 
-        if not cache:
-            raise RuntimeError("未能从 parquet 加载到任何有效数据（缺少 code/date/wechat_index？）")
+        result_df = pd.DataFrame(pool)
+        if not result_df.empty:
+            result_df = result_df.sort_values(
+                ["target_index", "code"],
+                ascending=[False, True]
+            ).reset_index(drop=True)
 
-        # 3) 逐交易日跑入池 + 回测 + 统计
-        all_pools = []
-        all_details = []
-        daily_summaries = []
+        # 回测（按当天池子）
+        detail_df, hit_rate = calc_forward_hit_rate_with_baostock(
+            result_df=result_df,
+            target_date=target_date,
+            fwd_days=FWD_DAYS,
+            take_profit=TAKE_PROFIT,
+            show_pbar=True,
+            adjustflag=ADJUSTFLAG,
+        )
 
-        for target_date in tqdm(trading_days, desc="Processing trading days"):
-            target_date = pd.to_datetime(target_date)
-
-            pool = []
-            items = list(cache.items())
-            for code6, df in tqdm(items, total=len(items), desc=f"{target_date.date()} scan", leave=False):
-                try:
-                    prev_df, target_row = pick_window(df, target_date, LOOKBACK)
-                    if target_row is None or prev_df is None:
-                        continue
-
-                    passed, reasons = check_conditions(
-                        df_full=df,
-                        prev_df=prev_df,
-                        target_row=target_row,
-                        active_conditions=ACTIVE_CONDITIONS,
-                        c4_lookback_days=C4_LOOKBACK_DAYS,
-                    )
-                    if not passed:
-                        continue
-
-                    # 对所有启用条件都生效 —— target_date 当日涨跌幅区间约束
-                    pct_ok = daily_pct_change_ok_with_baostock(
-                        bs=bs,
-                        code6=code6,
-                        target_date=target_date,
-                        max_drop=MAX_DAILY_DROP,
-                        max_rise=MAX_DAILY_RISE,
-                        adjustflag=ADJUSTFLAG,
-                    )
-                    if not pct_ok:
-                        continue
-
-                    # 价格约束：只要 reason 里有 C2/C3/C4，就检查；不通过就移除这些 reason
-                    need_price_filter = any(
-                        r.startswith(("C2:", "C3:", "C4:")) for r in reasons
-                    )
-                    if need_price_filter:
-                        price_ok = prevN_price_range_ok_with_baostock(
-                            bs=bs,
-                            code6=code6,
-                            target_date=target_date,
-                            n_days=PRICE_LOOKBACK,
-                            threshold=PRICE_RANGE_MAX,
-                            adjustflag=ADJUSTFLAG,
-                        )
-                        if not price_ok:
-                            reasons = [r for r in reasons if not r.startswith(("C2:", "C3:", "C4:"))]
-
-                    if not reasons:
-                        continue
-
-                    pool.append({
-                        "target_date": target_date.date(),
-                        "code": str(target_row["code"]).zfill(6),
-                        "name": target_row.get("name", ""),
-                        "target_index": target_row.get("wechat_index"),
-                        "prev5_mean": prev_df["wechat_index"].mean(),
-                        "prev5_min": prev_df["wechat_index"].min(),
-                        "prev5_max": prev_df["wechat_index"].max(),
-                        "reason": "; ".join(reasons),
-                    })
-                except Exception:
-                    continue
-
-            result_df = pd.DataFrame(pool)
-            if not result_df.empty:
-                result_df = result_df.sort_values(
-                    ["target_index", "code"],
-                    ascending=[False, True]
-                ).reset_index(drop=True)
-
-            # 回测（按当天池子）
-            detail_df, hit_rate = calc_forward_hit_rate_with_baostock(
-                bs=bs,
-                result_df=result_df,
-                target_date=target_date,
-                fwd_days=FWD_DAYS,
-                take_profit=TAKE_PROFIT,
-                show_pbar=True,
-                adjustflag=ADJUSTFLAG,
+        # 合并回测字段
+        if not result_df.empty and not detail_df.empty:
+            result_df = result_df.merge(
+                detail_df[[
+                    "target_date", "code",
+                    "buy_date", "buy_close",
+                    "max_high_next10d", "max_return_next10d", "hit_take_profit",
+                    "min_low_next10d", "min_drawdown_next10d",
+                    "days_to_hit", "hit_date"
+                ]],
+                on=["target_date", "code"],
+                how="left"
             )
 
-            # 合并回测字段
-            if not result_df.empty and not detail_df.empty:
-                result_df = result_df.merge(
-                    detail_df[[
-                        "target_date", "code",
-                        "buy_date", "buy_close",
-                        "max_high_next10d", "max_return_next10d", "hit_take_profit",
-                        "min_low_next10d", "min_drawdown_next10d",
-                        "days_to_hit", "hit_date"
-                    ]],
-                    on=["target_date", "code"],
-                    how="left"
-                )
+        # 分条件统计（仅对有回测结果的）
+        if not result_df.empty:
+            result_df = add_condition_flags(result_df)
 
-            # 分条件统计（仅对有回测结果的）
-            if not result_df.empty:
-                result_df = add_condition_flags(result_df)
+            overall = result_df.dropna(subset=["max_return_next10d"])
+            bt_sample_n = int(overall.shape[0])
+            bt_hit_rate = float(overall["hit_take_profit"].mean()) if bt_sample_n > 0 else float("nan")
+            bt_avg_pnl = float(overall["max_return_next10d"].mean()) if bt_sample_n > 0 else float("nan")
 
-                overall = result_df.dropna(subset=["max_return_next10d"])
-                bt_sample_n = int(overall.shape[0])
-                bt_hit_rate = float(overall["hit_take_profit"].mean()) if bt_sample_n > 0 else float("nan")
-                bt_avg_pnl = float(overall["max_return_next10d"].mean()) if bt_sample_n > 0 else float("nan")
+            bt_avg_drawdown = float(overall["min_drawdown_next10d"].mean()) if bt_sample_n > 0 else float("nan")
+            hit_only = overall[overall["hit_take_profit"] == True]
+            bt_avg_days_to_hit = float(hit_only["days_to_hit"].mean()) if not hit_only.empty else float("nan")
 
-                bt_avg_drawdown = float(overall["min_drawdown_next10d"].mean()) if bt_sample_n > 0 else float("nan")
-                hit_only = overall[overall["hit_take_profit"] == True]
-                bt_avg_days_to_hit = float(hit_only["days_to_hit"].mean()) if not hit_only.empty else float("nan")
+            stats_C1 = summarize_by_condition(result_df, "is_C1")
+            stats_C2 = summarize_by_condition(result_df, "is_C2")
+            stats_C3 = summarize_by_condition(result_df, "is_C3")
+            stats_C4 = summarize_by_condition(result_df, "is_C4")
+        else:
+            bt_sample_n = 0
+            bt_hit_rate = float("nan")
+            bt_avg_pnl = float("nan")
+            bt_avg_drawdown = float("nan")
+            bt_avg_days_to_hit = float("nan")
+            stats_C1 = {"n": 0, "hit_rate": float("nan"), "avg_pnl": float("nan")}
+            stats_C2 = {"n": 0, "hit_rate": float("nan"), "avg_pnl": float("nan")}
+            stats_C3 = {"n": 0, "hit_rate": float("nan"), "avg_pnl": float("nan")}
+            stats_C4 = {"n": 0, "hit_rate": float("nan"), "avg_pnl": float("nan")}
 
-                stats_C1 = summarize_by_condition(result_df, "is_C1")
-                stats_C2 = summarize_by_condition(result_df, "is_C2")
-                stats_C3 = summarize_by_condition(result_df, "is_C3")
-                stats_C4 = summarize_by_condition(result_df, "is_C4")
-            else:
-                bt_sample_n = 0
-                bt_hit_rate = float("nan")
-                bt_avg_pnl = float("nan")
-                bt_avg_drawdown = float("nan")
-                bt_avg_days_to_hit = float("nan")
-                stats_C1 = {"n": 0, "hit_rate": float("nan"), "avg_pnl": float("nan")}
-                stats_C2 = {"n": 0, "hit_rate": float("nan"), "avg_pnl": float("nan")}
-                stats_C3 = {"n": 0, "hit_rate": float("nan"), "avg_pnl": float("nan")}
-                stats_C4 = {"n": 0, "hit_rate": float("nan"), "avg_pnl": float("nan")}
+        daily_summaries.append({
+            "target_date": target_date.date(),
+            "pool_size": int(len(result_df)),
+            "backtest_sample_n": bt_sample_n,
+            "backtest_hit_rate": bt_hit_rate,
+            "backtest_avg_pnl": bt_avg_pnl,
 
-            daily_summaries.append({
-                "target_date": target_date.date(),
-                "pool_size": int(len(result_df)),
-                "backtest_sample_n": bt_sample_n,
-                "backtest_hit_rate": bt_hit_rate,
-                "backtest_avg_pnl": bt_avg_pnl,
+            "backtest_avg_min_drawdown": bt_avg_drawdown,
+            "backtest_avg_days_to_hit": bt_avg_days_to_hit,
 
-                "backtest_avg_min_drawdown": bt_avg_drawdown,
-                "backtest_avg_days_to_hit": bt_avg_days_to_hit,
+            "C1_n": stats_C1["n"], "C1_hit_rate": stats_C1["hit_rate"], "C1_avg_pnl": stats_C1["avg_pnl"],
+            "C2_n": stats_C2["n"], "C2_hit_rate": stats_C2["hit_rate"], "C2_avg_pnl": stats_C2["avg_pnl"],
+            "C3_n": stats_C3["n"], "C3_hit_rate": stats_C3["hit_rate"], "C3_avg_pnl": stats_C3["avg_pnl"],
+            "C4_n": stats_C4["n"], "C4_hit_rate": stats_C4["hit_rate"], "C4_avg_pnl": stats_C4["avg_pnl"],
+        })
 
-                "C1_n": stats_C1["n"], "C1_hit_rate": stats_C1["hit_rate"], "C1_avg_pnl": stats_C1["avg_pnl"],
-                "C2_n": stats_C2["n"], "C2_hit_rate": stats_C2["hit_rate"], "C2_avg_pnl": stats_C2["avg_pnl"],
-                "C3_n": stats_C3["n"], "C3_hit_rate": stats_C3["hit_rate"], "C3_avg_pnl": stats_C3["avg_pnl"],
-                "C4_n": stats_C4["n"], "C4_hit_rate": stats_C4["hit_rate"], "C4_avg_pnl": stats_C4["avg_pnl"],
-            })
+        if not result_df.empty:
+            all_pools.append(result_df)
+        if not detail_df.empty:
+            all_details.append(detail_df)
 
-            if not result_df.empty:
-                all_pools.append(result_df)
-            if not detail_df.empty:
-                all_details.append(detail_df)
+    pools_all = pd.concat(all_pools, ignore_index=True) if all_pools else pd.DataFrame()
+    details_all = pd.concat(all_details, ignore_index=True) if all_details else pd.DataFrame()
+    summary_df = pd.DataFrame(daily_summaries).sort_values("target_date").reset_index(drop=True)
 
-        pools_all = pd.concat(all_pools, ignore_index=True) if all_pools else pd.DataFrame()
-        details_all = pd.concat(all_details, ignore_index=True) if all_details else pd.DataFrame()
-        summary_df = pd.DataFrame(daily_summaries).sort_values("target_date").reset_index(drop=True)
+    # 4) 写 Excel
+    with pd.ExcelWriter(OUT_XLSX, engine="openpyxl") as writer:
+        summary_df.to_excel(writer, sheet_name="daily_summary", index=False)
+        pools_all.to_excel(writer, sheet_name="pools_all", index=False)
+        details_all.to_excel(writer, sheet_name="backtest_detail", index=False)
 
-        # 4) 写 Excel
-        with pd.ExcelWriter(OUT_XLSX, engine="openpyxl") as writer:
-            summary_df.to_excel(writer, sheet_name="daily_summary", index=False)
-            pools_all.to_excel(writer, sheet_name="pools_all", index=False)
-            details_all.to_excel(writer, sheet_name="backtest_detail", index=False)
+    print(f"\n已完成：{MONTH_START} ~ {MONTH_END} 回测结果已保存到：{OUT_XLSX}")
+    print(f"交易日数量：{len(trading_days)} | 总入池行数：{len(pools_all)} | 总回测明细行数：{len(details_all)}")
+    print(f"本次启用条件：{ACTIVE_CONDITIONS}")
 
-        print(f"\n已完成：{MONTH_START} ~ {MONTH_END} 回测结果已保存到：{OUT_XLSX}")
-        print(f"交易日数量：{len(trading_days)} | 总入池行数：{len(pools_all)} | 总回测明细行数：{len(details_all)}")
-        print(f"本次启用条件：{ACTIVE_CONDITIONS}")
-
-    finally:
-        bs.logout()
 
 
 if __name__ == "__main__":

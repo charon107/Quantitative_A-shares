@@ -2,7 +2,8 @@ import os
 import glob
 import pandas as pd
 from tqdm import tqdm
-import baostock as bs
+
+from src.data_collection import tushare_client as tsc
 
 # =========================
 # 配置区（跟你第一次脚本保持一致）
@@ -18,27 +19,9 @@ LIMITUP_PCT = 9.9   # pctChg >= 9.9 视为涨停
 
 
 def load_code_name_map() -> dict:
-    """用 baostock 拉 code -> name 映射（code 形如 sh.600000）"""
-    lg = bs.login()
-    if lg.error_code != "0":
-        raise RuntimeError(f"baostock login failed: {lg.error_msg}")
-
-    try:
-        rs = bs.query_stock_basic()
-        if rs.error_code != "0":
-            raise RuntimeError(f"query_stock_basic failed: {rs.error_msg}")
-        df = rs.get_data()
-        if df is None or df.empty:
-            return {}
-        # 常见字段：code, code_name
-        if "code" not in df.columns:
-            return {}
-        name_col = "code_name" if "code_name" in df.columns else None
-        if not name_col:
-            return {}
-        return dict(zip(df["code"].astype(str), df[name_col].astype(str)))
-    finally:
-        bs.logout()
+    """用 tushare 拉 code -> name 映射（code 形如 sh.600000）"""
+    df = tsc.fetch_stock_basic()
+    return dict(zip(df["code"].astype(str), df["code_name"].astype(str)))
 
 
 def bs_code_to_6(code: str) -> str:

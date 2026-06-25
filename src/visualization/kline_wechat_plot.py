@@ -7,13 +7,14 @@ E_TIME     = '20251218'                     # 结束日期：YYYYMMDD
 
 
 import requests
-import baostock as bs
 import pandas as pd
 import matplotlib.pyplot as plt
 from datetime import datetime
 from matplotlib.patches import Rectangle
 from matplotlib.ticker import ScalarFormatter
 import matplotlib.dates as mdates
+
+from src.data_collection import tushare_client as tsc
 
 # 设置中文字体
 plt.rcParams['font.sans-serif'] = ['SimHei', 'Arial Unicode MS']
@@ -22,34 +23,23 @@ plt.rcParams['axes.unicode_minus'] = False
 
 # ========== 股票部分函数 ==========
 def get_code_by_name(name):
-    """通过公司名称模糊查询，返回 code，code_name"""
-    rs = bs.query_stock_basic(code_name=name)
-    while rs.error_code == '0' and rs.next():
-        row = rs.get_row_data()
-        return row[0], row[1]
-    return None, None
+    """通过公司名称模糊查询，返回 code，code_name（tushare 没有服务端按名称过滤的
+    参数，拉全量列表后在本地按子串匹配，股票总数不大，性能没问题）"""
+    df = tsc.fetch_stock_basic()
+    hit = df[df["code_name"].str.contains(name, na=False)]
+    if hit.empty:
+        return None, None
+    row = hit.iloc[0]
+    return row["code"], row["code_name"]
 
 
 def get_k_data_by_date(stock_code, start_date, end_date, adjustflag="2"):
-    """根据指定日期范围获取日 K 线数据"""
+    """根据指定日期范围获取日 K 线数据（前复权，tushare daily + adj_factor 拼算）"""
     start_date = datetime.strptime(start_date, "%Y%m%d").strftime("%Y-%m-%d")
     end_date   = datetime.strptime(end_date, "%Y%m%d").strftime("%Y-%m-%d")
 
-    fields = "date,code,open,high,low,close,volume,amount,adjustflag"
-    rs = bs.query_history_k_data_plus(
-        stock_code,
-        fields,
-        start_date=start_date,
-        end_date=end_date,
-        frequency="d",
-        adjustflag=adjustflag
-    )
-
-    data_list = []
-    while rs.error_code == '0' and rs.next():
-        data_list.append(rs.get_row_data())
-
-    df = pd.DataFrame(data_list, columns=rs.fields)
+    fields = ["date", "code", "open", "high", "low", "close", "volume", "amount", "adjustflag"]
+    df = tsc.fetch_kline_qfq(stock_code, start_date=start_date, end_date=end_date, fields=fields)
     df['date'] = pd.to_datetime(df['date'])
     numeric_cols = ["open", "high", "low", "close", "volume", "amount"]
     df[numeric_cols] = df[numeric_cols].apply(pd.to_numeric, errors='coerce')
@@ -229,16 +219,13 @@ def plot_all(df, stock_name, stock_code, wx_times, wx_scores):
 # ========== 主程序入口 ==========
 if __name__ == "__main__":
     # 获取股票数据
-    bs.login()
     code, real_name = get_code_by_name(KEYWORD)
 
     if code is None:
         print(f"未找到股票：{KEYWORD}")
-        bs.logout()
         exit()
 
     df = get_k_data_by_date(code, K_TIME, E_TIME)
-    bs.logout()
 
     # 获取微信指数
     wx = WeChatIndex()

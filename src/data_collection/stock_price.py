@@ -1,78 +1,50 @@
 import os
 import sys
 import json
-import time
-import random
 import signal
+import random
 import hashlib
 from datetime import datetime, timedelta
 from multiprocessing.pool import Pool
 
-import baostock as bs
 import pandas as pd
 from tqdm import tqdm
 
-# pandas>=2.0 移除了 DataFrame.append，而 baostock 0.9.2 的 resultset.get_data()
-# 仍在调用它（CI 用 `uv sync --frozen` 会重装原版 baostock，故必须在项目侧兜底）。
-# 这里补一个等价垫片，把 append 转成 concat，保证拉取股价/股票列表不报 AttributeError。
-if not hasattr(pd.DataFrame, "append"):
-    def _df_append(self, other, ignore_index=False, verify_integrity=False, sort=False):
-        others = other if isinstance(other, (list, tuple)) else [other]
-        frames = [self] + [
-            o if isinstance(o, pd.DataFrame) else pd.DataFrame(o) for o in others
-        ]
-        return pd.concat(frames, ignore_index=ignore_index)
-
-    pd.DataFrame.append = _df_append
+from src.data_collection import tushare_client as tsc
 
 # =========================
 # 配置区
 # =========================
 START_DATE = "2025-01-01"              # 拉取起始日期
 BASE_DIR = "股价数据_parquet_fq"      # 数据保存根目录
-ADJUSTFLAG = "2"                       # 1后复权 2前复权 3不复权
-
-# 日线字段（baostock）
-K_FIELDS = "date,code,open,high,low,close,volume,amount,turn,pctChg"
 
 # 检查复权因子是否变化：每次运行回看最近 N 天（越大越保险，越慢一点）
 FACTOR_LOOKBACK_DAYS = 30
 
-# 并行抓取的进程数（baostock 连接是模块级全局、非线程安全，只能多进程；
-# 每进程独立登录。限流报错时调小此值即可）。
-WORKERS = int(os.environ.get("BAOSTOCK_WORKERS", "8"))
-
-# 重试配置（参照 wechat_index.py）：瞬时错误（网络波动/限流）指数退避重试
-MAX_RETRIES = int(os.environ.get("BAOSTOCK_MAX_RETRIES", "6"))
-BACKOFF_BASE = float(os.environ.get("BAOSTOCK_BACKOFF_BASE", "1.6"))
-BACKOFF_CAP = float(os.environ.get("BAOSTOCK_BACKOFF_CAP", "120"))
-
-# 请求间隔（防 baostock 限流，默认 0.1-0.3s 随机延迟）
-MIN_PACE = float(os.environ.get("BAOSTOCK_MIN_PACE", "0.1"))
-MAX_PACE = float(os.environ.get("BAOSTOCK_MAX_PACE", "0.3"))
+# 并行抓取的进程数（tushare 是纯 HTTP 调用、按积分分级限频，不是 baostock 的
+# socket 连接限速；此默认值按 2000+ 积分档保守估计，积分更高可以调大）。
+WORKERS = int(os.environ.get("TUSHARE_WORKERS", "4"))
 
 # chunksize：主进程与 worker 间的 IPC 粒度（增大减少 pickle 轮次）
-CHUNKSIZE = int(os.environ.get("BAOSTOCK_CHUNKSIZE", "32"))
+CHUNKSIZE = int(os.environ.get("TUSHARE_CHUNKSIZE", "16"))
 
 # 因子检查周期：距上次检查超过此天数才重新查因子
 FACTOR_CHECK_INTERVAL_DAYS = int(os.environ.get("FACTOR_CHECK_INTERVAL_DAYS", "7"))
 FACTOR_CHECK_DATES_PATH = os.path.join(BASE_DIR, "factor_check_dates.parquet")
 
-# 开盘日快速跳过：抽查几只代表性股票确认是否有新交易日
-QUICK_CHECK_COUNT = int(os.environ.get("BAOSTOCK_QUICK_CHECK", "2"))
-
-# 黑名单封禁后的冷却时长（小时）：期间的 run 直接跳过，不再触发 baostock 请求
-BLACKLIST_COOLDOWN_HOURS = float(os.environ.get("BAOSTOCK_BLACKLIST_COOLDOWN_HOURS", "6"))
-
-
-class BaostockBlacklistedError(RuntimeError):
-    """baostock 返回全局性永久封禁错误（如"黑名单用户"），重试无意义，需立即熔断。"""
+# 永久性错误（token失效/权限不足/积分不够）熔断后的冷却时长（小时）：
+# 期间的 run 直接跳过，不再触发任何 tushare 请求。
+FATAL_COOLDOWN_HOURS = float(os.environ.get("TUSHARE_FATAL_COOLDOWN_HOURS", "6"))
 
 # =========================
 # 路径区
 # =========================
-DATA_DIR = os.path.join(BASE_DIR, "kline_fq")        # 前复权日线 parquet
-FACTOR_DIR = os.path.join(BASE_DIR, "adj_factor")    # 复权因子 parquet
+DATA_DIR = os.path.join(BASE_DIR, "kline_fq")           # 前复权日线 parquet
+# 复权因子换成新目录：tushare 的因子 schema（code/trade_date/adj_factor）和
+# baostock 的（code/dividOperateDate/foreAdjustFactor/...）不兼容，复用旧目录
+# 会读出脏数据；用新目录会让每只股票在迁移后第一次跑触发一次 FULL_REBUILD，
+# 这是迁移的预期一次性成本。
+FACTOR_DIR = os.path.join(BASE_DIR, "adj_factor_ts")
 STATE_PATH = os.path.join(BASE_DIR, "state.json")
 NAME_MAP_PATH = os.path.join(BASE_DIR, "code_name_map.parquet")  # 代码->公司名称映射（供看板显示）
 
@@ -92,11 +64,6 @@ def load_state():
 def save_state(state: dict):
     with open(STATE_PATH, "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
-
-
-def _pace():
-    """请求间隔：在每次 baostock API 调用前做小随机延迟，避免限流。"""
-    time.sleep(random.uniform(MIN_PACE, MAX_PACE))
 
 
 def load_factor_check_dates() -> dict[str, str]:
@@ -150,7 +117,7 @@ def stable_hash_df(df: pd.DataFrame, cols: list[str]) -> str:
     if not keep:
         return "NO_COLS"
     use = use[keep].copy()
-    sort_cols = [c for c in ["code", "dividOperateDate"] if c in use.columns]
+    sort_cols = [c for c in ["code", "trade_date"] if c in use.columns]
     if sort_cols:
         use = use.sort_values(sort_cols)
     payload = use.to_csv(index=False).encode("utf-8")
@@ -187,25 +154,9 @@ def filter_mainboard(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def get_stock_list() -> pd.DataFrame:
-    """
-    获取沪深主板股票列表（约3000+）
-    优先 query_stock_basic，失败则兜底 query_all_stock
-    """
-    rs = bs.query_stock_basic()
-    if rs.error_code == "0":
-        df = rs.get_data()
-        if df is not None and not df.empty:
-            return filter_mainboard(df)
-
-    rs2 = bs.query_all_stock()
-    if rs2.error_code != "0":
-        raise RuntimeError(f"Stock list query failed: {rs2.error_msg}")
-
-    df2 = rs2.get_data()
-    if df2 is None or df2.empty:
-        raise RuntimeError("query_all_stock returned empty DataFrame.")
-
-    return filter_mainboard(df2)
+    """获取沪深主板股票列表（约3000+）。"""
+    df = tsc.fetch_stock_basic()
+    return filter_mainboard(df)
 
 
 def save_name_map(stock_df: pd.DataFrame):
@@ -213,10 +164,9 @@ def save_name_map(stock_df: pd.DataFrame):
     保存代码->公司名称映射到 parquet，供可视化看板显示公司名称。
 
     数据随 股价数据_parquet_fq/ 目录一起同步到 Hugging Face，
-    看板只读本地文件，无需自己联网调 baostock。
+    看板只读本地文件，无需自己联网调 tushare。
 
-    query_stock_basic 返回 code_name 列；query_all_stock 兜底返回 code_name。
-    若两者都没有名称列，则跳过（看板回退到只显示代码）。
+    fetch_stock_basic 返回 code_name 列；若没有名称列则跳过（看板回退到只显示代码）。
     """
     name_col = None
     for candidate in ["code_name", "证券简称", "name"]:
@@ -245,87 +195,18 @@ def build_name_map_only():
     用法：python src/data_collection/stock_price.py name-map
     """
     ensure_dirs()
-    lg = bs.login()
-    if lg.error_code != "0":
-        raise RuntimeError(f"baostock login failed: {lg.error_msg}")
-    try:
-        stock_df = get_stock_list()
-        save_name_map(stock_df)
-    finally:
-        bs.logout()
+    stock_df = get_stock_list()
+    save_name_map(stock_df)
 
 
 def fetch_kline_fq(code: str, start_date: str, end_date: str = "") -> pd.DataFrame:
-    """
-    拉取前复权日线（带重试 + 请求节流）。
-    """
-    last_err = None
-    for attempt in range(1, MAX_RETRIES + 1):
-        try:
-            _pace()
-            rs = bs.query_history_k_data_plus(
-                code,
-                K_FIELDS,
-                start_date=start_date,
-                end_date=end_date,
-                frequency="d",
-                adjustflag=ADJUSTFLAG
-            )
-            if rs.error_code != "0":
-                raise RuntimeError(f"query_history_k_data_plus failed for {code}: {rs.error_msg}")
-
-            df = rs.get_data()
-            if df is None or df.empty:
-                return pd.DataFrame()
-
-            df["date"] = pd.to_datetime(df["date"], errors="coerce")
-            num_cols = ["open", "high", "low", "close", "volume", "amount", "turn", "pctChg"]
-            for col in num_cols:
-                if col in df.columns:
-                    df[col] = pd.to_numeric(df[col], errors="coerce")
-
-            df = df.dropna(subset=["date"])
-            df = df.sort_values(["date"]).drop_duplicates(subset=["date"], keep="last").reset_index(drop=True)
-            return df
-        except Exception as e:
-            if "黑名单" in str(e):
-                raise BaostockBlacklistedError(str(e)) from e
-            last_err = e
-            if attempt < MAX_RETRIES:
-                wait = min(BACKOFF_CAP, (BACKOFF_BASE ** (attempt - 1)) + random.uniform(0, 1.5))
-                print(f"[Retry {attempt}/{MAX_RETRIES}] fetch_kline_fq({code}), wait {wait:.1f}s: {e}")
-                time.sleep(wait)
-    raise RuntimeError(f"fetch_kline_fq({code}) failed after {MAX_RETRIES} retries: {last_err}")
+    """拉取前复权日线（tushare daily + adj_factor 拼算，内置重试 + 请求节流）。"""
+    return tsc.fetch_kline_qfq(code, start_date=start_date, end_date=end_date)
 
 
 def fetch_adjust_factor(code: str, start_date: str, end_date: str = "") -> pd.DataFrame:
-    """
-    拉取复权因子，用来判断是否需要重算前复权历史（带重试 + 请求节流）。
-    """
-    last_err = None
-    for attempt in range(1, MAX_RETRIES + 1):
-        try:
-            _pace()
-            rs = bs.query_adjust_factor(code=code, start_date=start_date, end_date=end_date)
-            if rs.error_code != "0":
-                raise RuntimeError(f"query_adjust_factor failed for {code}: {rs.error_msg}")
-
-            df = rs.get_data()
-            if df is None or df.empty:
-                return pd.DataFrame()
-
-            if "dividOperateDate" in df.columns:
-                df["dividOperateDate"] = pd.to_datetime(df["dividOperateDate"], errors="coerce")
-            return df
-        except Exception as e:
-            if "黑名单" in str(e):
-                raise BaostockBlacklistedError(str(e)) from e
-            last_err = e
-            if attempt < MAX_RETRIES:
-                wait = min(BACKOFF_CAP, (BACKOFF_BASE ** (attempt - 1)) + random.uniform(0, 1.5))
-                print(f"[Retry {attempt}/{MAX_RETRIES}] fetch_adjust_factor({code}), wait {wait:.1f}s: {e}")
-                time.sleep(wait)
-    raise RuntimeError(f"fetch_adjust_factor({code}) failed after {MAX_RETRIES} retries: {last_err}")
+    """拉取复权因子，用来判断是否需要重算前复权历史（tushare adj_factor，内置重试）。"""
+    return tsc.fetch_adj_factor_series(code, start_date=start_date, end_date=end_date)
 
 
 def get_last_date(existing: pd.DataFrame) -> str | None:
@@ -393,7 +274,7 @@ def update_one_stock(code: str, factor_check_start: str,
     factor_old = read_parquet_if_exists(f_path)
     old_hash = stable_hash_df(
         factor_old,
-        cols=["code", "dividOperateDate", "foreAdjustFactor", "backAdjustFactor", "adjustFactor"]
+        cols=["code", "trade_date", "adj_factor"]
     ) if need_factor_check else "SKIPPED"
 
     if need_factor_check:
@@ -402,14 +283,14 @@ def update_one_stock(code: str, factor_check_start: str,
         if not factor_new.empty:
             factor_all = pd.concat([factor_old, factor_new], ignore_index=True) if not factor_old.empty else factor_new
             factor_all = factor_all.drop_duplicates()
-            if "dividOperateDate" in factor_all.columns:
-                factor_all = factor_all.sort_values(["dividOperateDate"])
+            if "trade_date" in factor_all.columns:
+                factor_all = factor_all.sort_values(["trade_date"])
         else:
             factor_all = factor_old
 
         new_hash = stable_hash_df(
             factor_all,
-            cols=["code", "dividOperateDate", "foreAdjustFactor", "backAdjustFactor", "adjustFactor"]
+            cols=["code", "trade_date", "adj_factor"]
         )
         factor_changed = (new_hash != old_hash)
 
@@ -508,35 +389,29 @@ def _sigterm_handler(signum, frame):
     sys.exit(128 + signum)
 
 
-def _pool_init():
-    """每个 worker 进程启动时登录一次 baostock。OS 关闭进程时连接自动断开，无需 atexit logout。"""
-    lg = bs.login()
-    if lg.error_code != "0":
-        raise RuntimeError(f"baostock login failed in worker: {lg.error_msg}")
-
-
 def _update_task(args):
     """进程池任务：更新单只股票，异常转成 ERROR 结果而非抛出（避免拖垮整个池）。
 
-    黑名单封禁单独标记为 BLACKLISTED，供主进程识别并立即熔断整个 run。
+    永久性错误（token失效/权限不足/积分不够）单独标记为 FATAL，供主进程识别
+    并立即熔断整个 run。
     """
     code, factor_check_start, factor_check_dates = args
     try:
         return update_one_stock(code, factor_check_start=factor_check_start,
                                 factor_check_dates=factor_check_dates)
-    except BaostockBlacklistedError as e:
-        return {"code": code, "mode": "BLACKLISTED", "error": str(e)}
+    except tsc.TushareFatalError as e:
+        return {"code": code, "mode": "FATAL", "error": str(e)}
     except Exception as e:
         return {"code": code, "mode": "ERROR", "error": str(e)}
 
 
-def _trip_blacklist_breaker(state: dict, error_msg: str):
-    """检测到 baostock 全局黑名单封禁：记录冷却期截止时间，供后续 run 快速跳过。"""
-    cooldown_until = datetime.now() + timedelta(hours=BLACKLIST_COOLDOWN_HOURS)
-    state["blacklisted_until"] = cooldown_until.isoformat()
+def _trip_fatal_breaker(state: dict, error_msg: str):
+    """检测到 tushare 永久性错误：记录冷却期截止时间，供后续 run 快速跳过。"""
+    cooldown_until = datetime.now() + timedelta(hours=FATAL_COOLDOWN_HOURS)
+    state["fatal_blocked_until"] = cooldown_until.isoformat()
     save_state(state)
-    print(f"[Blacklist] baostock 返回黑名单错误，立即停止本次运行：{error_msg}")
-    print(f"[Blacklist] 冷却至 {cooldown_until.isoformat()} 前，期间的 run 将自动跳过。")
+    print(f"[Fatal] tushare 返回永久性错误，立即停止本次运行：{error_msg}")
+    print(f"[Fatal] 冷却至 {cooldown_until.isoformat()} 前，期间的 run 将自动跳过。")
 
 
 def _get_latest_local_date(codes: list[str], sample_size: int = 50) -> str | None:
@@ -559,50 +434,35 @@ def _get_latest_local_date(codes: list[str], sample_size: int = 50) -> str | Non
     return min(all_dates)
 
 
-def _quick_check_latest_market_date(codes: list[str]) -> str | None:
-    """随机抽查几只代表性股票，从 baostock 确认最新可用的交易日。"""
-    check_codes = random.sample(codes, min(QUICK_CHECK_COUNT, len(codes)))
-    latest_dates = []
-    for code in check_codes:
-        try:
-            df = fetch_kline_fq(
-                code,
-                start_date=(datetime.today() - timedelta(days=10)).strftime("%Y-%m-%d"),
-                end_date=""
-            )
-            if not df.empty and "date" in df.columns:
-                dmax = df["date"].max().strftime("%Y-%m-%d")
-                latest_dates.append(dmax)
-        except BaostockBlacklistedError:
-            raise
-        except Exception:
-            pass
-    if not latest_dates:
+def _quick_check_latest_market_date() -> str | None:
+    """直接查交易日历，确认最新可用的交易日（比抽样查股票K线更直接、更省请求）。"""
+    dates = tsc.fetch_trade_dates(
+        start_date=(datetime.today() - timedelta(days=10)).strftime("%Y-%m-%d"),
+        end_date=datetime.today().strftime("%Y-%m-%d"),
+    )
+    if not dates:
         return None
-    return max(latest_dates)
+    return max(dates).strftime("%Y-%m-%d")
 
 
 def main():
     ensure_dirs()
     state = load_state()
 
-    # -------- 黑名单冷却期检查：命中过封禁时，本次直接跳过，不再触发任何 baostock 请求 --------
-    cooldown_until = state.get("blacklisted_until")
+    # -------- 永久性错误冷却期检查：命中过熔断时，本次直接跳过，不再触发任何 tushare 请求 --------
+    cooldown_until = state.get("fatal_blocked_until")
     if cooldown_until and datetime.now() < datetime.fromisoformat(cooldown_until):
-        print(f"[Skip] baostock 黑名单冷却期内（至 {cooldown_until}），本次不再尝试。")
+        print(f"[Skip] tushare 永久性错误冷却期内（至 {cooldown_until}），本次不再尝试。")
         return
 
-    # -------- 主进程登录一次：仅用于拉股票列表 + 刷新名称映射 --------
-    lg = bs.login()
-    if lg.error_code != "0":
-        raise RuntimeError(f"baostock login failed: {lg.error_msg}")
     try:
         stock_df = get_stock_list()
-        codes = stock_df["code"].tolist()
-        # 顺便刷新代码->名称映射，供看板显示公司名称（随 HF 同步）
-        save_name_map(stock_df)
-    finally:
-        bs.logout()
+    except tsc.TushareFatalError as e:
+        _trip_fatal_breaker(state, str(e))
+        sys.exit(1)
+    codes = stock_df["code"].tolist()
+    # 顺便刷新代码->名称映射，供看板显示公司名称（随 HF 同步）
+    save_name_map(stock_df)
 
     factor_check_start = (datetime.today() - timedelta(days=FACTOR_LOOKBACK_DAYS)).strftime("%Y-%m-%d")
     if factor_check_start < START_DATE:
@@ -616,21 +476,16 @@ def main():
     # -------- 开盘日快速跳过：周末/假日无新数据时直接退出 --------
     local_latest = _get_latest_local_date(codes)
     if local_latest and limit == 0:  # 只在非冒烟模式生效
-        # 主进程重新登录（之前已登出）以查询最新日期
-        lg2 = bs.login()
-        if lg2.error_code == "0":
-            try:
-                market_latest = _quick_check_latest_market_date(codes)
-                if market_latest and local_latest >= market_latest:
-                    print(f"[Skip] 数据已是最新（本地 {local_latest} >= 市场 {market_latest}），无需更新。")
-                    state["last_run"] = datetime.today().strftime("%Y-%m-%d %H:%M:%S")
-                    save_state(state)
-                    return
-            except BaostockBlacklistedError as e:
-                _trip_blacklist_breaker(state, str(e))
-                sys.exit(1)
-            finally:
-                bs.logout()
+        try:
+            market_latest = _quick_check_latest_market_date()
+            if market_latest and local_latest >= market_latest:
+                print(f"[Skip] 数据已是最新（本地 {local_latest} >= 市场 {market_latest}），无需更新。")
+                state["last_run"] = datetime.today().strftime("%Y-%m-%d %H:%M:%S")
+                save_state(state)
+                return
+        except tsc.TushareFatalError as e:
+            _trip_fatal_breaker(state, str(e))
+            sys.exit(1)
 
     # -------- 加载因子检查日期追踪 --------
     factor_check_dates = load_factor_check_dates()
@@ -647,14 +502,14 @@ def main():
     errors = []
     factor_checked_count = 0
 
-    # -------- 多进程并行更新每只股票（每进程独立 baostock 登录）--------
+    # -------- 多进程并行更新每只股票（tushare 是纯 HTTP 调用，worker 无需登录）--------
     # 注册 SIGTERM 处理器：GitHub Actions 手动取消时发 SIGTERM，立即 terminate() pool，
-    # 避免 worker 进程成为孤儿（worker 被 SIGTERM 杀死，不触发 atexit，连接由 OS 关闭）。
+    # 避免 worker 进程成为孤儿。
     signal.signal(signal.SIGTERM, _sigterm_handler)
 
     global _active_pool
     tasks = [(code, factor_check_start, factor_check_dates) for code in codes]
-    with Pool(processes=WORKERS, initializer=_pool_init) as pool:
+    with Pool(processes=WORKERS) as pool:
         _active_pool = pool
         for r in tqdm(
             pool.imap(_update_task, tasks, chunksize=CHUNKSIZE),
@@ -662,12 +517,12 @@ def main():
             desc="Updating HS Mainboard (front-adjusted)",
         ):
             mode = r["mode"]
-            if mode == "BLACKLISTED":
+            if mode == "FATAL":
                 pool.terminate()
                 if r.get("factor_checked"):
                     factor_check_dates[r["code"]] = today_str
                 save_factor_check_dates(factor_check_dates)
-                _trip_blacklist_breaker(state, r.get("error"))
+                _trip_fatal_breaker(state, r.get("error"))
                 _active_pool = None
                 sys.exit(1)
             elif mode == "ERROR":

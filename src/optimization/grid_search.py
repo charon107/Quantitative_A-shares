@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-import baostock as bs
+from src.data_collection import tushare_client as tsc
 
 
 # =========================
@@ -53,52 +53,25 @@ def load_pool(excel_path: str) -> pd.DataFrame:
     return out
 
 
-def bs_login():
-    lg = bs.login()
-    if lg.error_code != "0":
-        raise RuntimeError(f"baostock login failed: {lg.error_code} {lg.error_msg}")
-
-
-def bs_logout():
-    bs.logout()
-
-
 def fetch_kline_daily(bs_code: str, start: str, end: str, adjustflag: str = "2") -> pd.DataFrame:
     """
-    拉取日线并缓存。
-    adjustflag: 2=前复权，1=后复权，3=不复权（baostock常用：2）
-    字段用 open/high/low/close/volume/amount
+    拉取前复权日线并缓存（tushare daily + adj_factor 拼算）。
+    字段用 open/high/low/close/volume/amount。
+
+    注：原 baostock 版本还查了 tradestatus/isST 两列，但全文件没有任何地方
+    实际使用它们做过滤（只是解析后从未被读取），迁移时直接去掉，不再额外
+    多查一个接口。
     """
     cache_path = os.path.join(CACHE_DIR, f"{bs_code}_{start}_{end}_adj{adjustflag}.parquet")
     if os.path.exists(cache_path):
         return pd.read_parquet(cache_path)
 
-    fields = "date,open,high,low,close,volume,amount,tradestatus,isST"
-    rs = bs.query_history_k_data_plus(
-        bs_code,
-        fields,
-        start_date=start,
-        end_date=end,
-        frequency="d",
-        adjustflag=adjustflag
-    )
-    if rs.error_code != "0":
-        raise RuntimeError(f"query_history_k_data_plus failed {bs_code}: {rs.error_code} {rs.error_msg}")
-
-    data_list = []
-    while rs.next():
-        data_list.append(rs.get_row_data())
-    if not data_list:
+    fields = ["date", "open", "high", "low", "close", "volume", "amount"]
+    df = tsc.fetch_kline_qfq(bs_code, start_date=start, end_date=end, fields=fields)
+    if df.empty:
         return pd.DataFrame()
 
-    df = pd.DataFrame(data_list, columns=fields.split(","))
     df["date"] = pd.to_datetime(df["date"])
-    for c in ["open", "high", "low", "close", "volume", "amount"]:
-        df[c] = pd.to_numeric(df[c], errors="coerce")
-
-    # tradestatus=1 可交易
-    df["tradestatus"] = pd.to_numeric(df["tradestatus"], errors="coerce")
-    df["isST"] = pd.to_numeric(df["isST"], errors="coerce")
     df = df.sort_values("date").reset_index(drop=True)
 
     df.to_parquet(cache_path, index=False)
@@ -386,11 +359,7 @@ def main():
     pool = load_pool(EXCEL_PATH)
     print(f"Filtered pool size (C2 & C3): {len(pool)}")
 
-    bs_login()
-    try:
-        grid_df, best_trades = grid_search(pool)
-    finally:
-        bs_logout()
+    grid_df, best_trades = grid_search(pool)
 
     # 输出结果
     os.makedirs("results/2025", exist_ok=True)

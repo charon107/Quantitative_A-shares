@@ -1,8 +1,9 @@
 import os
 import time
 import pandas as pd
-import baostock as bs
 from datetime import datetime, timedelta
+
+from src.data_collection import tushare_client as tsc
 
 # =========================
 # 配置区
@@ -17,9 +18,6 @@ PROFIT_DIR = os.path.join(OUT_DIR, "profit")
 OUT_DETAIL_CSV = os.path.join(OUT_DIR, "max_possible_return_detail.csv")
 OUT_YEAR_SUMMARY_CSV = os.path.join(OUT_DIR, "max_possible_return_year_summary.csv")
 
-# baostock 日线字段：必须含 date/close/high
-K_FIELDS = "date,close,high"
-
 # 非交易日对齐方式：
 #   "next" = 下一个交易日（推荐，不穿越）
 #   "prev" = 上一个交易日
@@ -28,7 +26,7 @@ ALIGN_NON_TRADING = "next"
 # 为了找到最近交易日，最多向前/向后找多少天
 ALIGN_SEARCH_DAYS = 30
 
-# baostock 查询频率控制（视情况调整）
+# tushare 查询频率控制（视情况调整；tsc 内部已有自己的节流/重试，这里是额外的保险）
 SLEEP_SECONDS_PER_QUERY = 0.0
 
 
@@ -52,35 +50,15 @@ def read_profit_pubdates() -> pd.DataFrame:
     return df
 
 
-def bs_rs_to_df(rs) -> pd.DataFrame:
-    if rs.error_code != "0":
-        raise RuntimeError(f"baostock query failed: {rs.error_code} {rs.error_msg}")
-    rows = []
-    while rs.next():
-        rows.append(rs.get_row_data())
-    return pd.DataFrame(rows, columns=rs.fields)
-
-
 def query_kdata(code: str, start_date: str, end_date: str) -> pd.DataFrame:
     """
     查询日线：date, close, high
     start_date/end_date: 'YYYY-MM-DD'
     """
-    rs = bs.query_history_k_data_plus(
-        code,
-        K_FIELDS,
-        start_date=start_date,
-        end_date=end_date,
-        frequency="d",
-        adjustflag="2"  # 2=后复权（更适合长期比较）；如果你想不复权可改 3 或 1
-    )
-    df = bs_rs_to_df(rs)
+    df = tsc.fetch_kline_qfq(code, start_date=start_date, end_date=end_date, fields=["date", "close", "high"])
     if df.empty:
         return df
 
-    df["date"] = pd.to_datetime(df["date"], errors="coerce")
-    df["close"] = pd.to_numeric(df["close"], errors="coerce")
-    df["high"] = pd.to_numeric(df["high"], errors="coerce")
     df = df.dropna(subset=["date", "close", "high"]).sort_values("date").reset_index(drop=True)
     return df
 
@@ -198,68 +176,60 @@ def main():
     # 构造字典：pubDate_map[(code, reqYear)] = pubDate
     pub_map = {(r["code"], int(r["reqYear"])): r["pubDate"] for _, r in pub.iterrows()}
 
-    lg = bs.login()
-    if lg.error_code != "0":
-        raise RuntimeError(f"baostock login failed: {lg.error_code} {lg.error_msg}")
+    rows = []
 
-    try:
-        rows = []
+    for i, r in selected.iterrows():
+        select_year = int(r["year"])
+        code = r["code"]
+        name = r.get("name", "")
 
-        for i, r in selected.iterrows():
-            select_year = int(r["year"])
-            code = r["code"]
-            name = r.get("name", "")
+        fy_end = select_year - 1
+        start_pub = pub_map.get((code, fy_end), None)
+        end_pub = pub_map.get((code, fy_end + 1), None)  # 下一份年报披露日
 
-            fy_end = select_year - 1
-            start_pub = pub_map.get((code, fy_end), None)
-            end_pub = pub_map.get((code, fy_end + 1), None)  # 下一份年报披露日
+        out = {
+            "select_year": select_year,
+            "fy_end": fy_end,
+            "code": code,
+            "name": name,
+            "start_pubDate": "" if start_pub is None else pd.Timestamp(start_pub).strftime("%Y-%m-%d"),
+            "end_pubDate": "" if end_pub is None else pd.Timestamp(end_pub).strftime("%Y-%m-%d"),
+        }
 
-            out = {
-                "select_year": select_year,
-                "fy_end": fy_end,
-                "code": code,
-                "name": name,
-                "start_pubDate": "" if start_pub is None else pd.Timestamp(start_pub).strftime("%Y-%m-%d"),
-                "end_pubDate": "" if end_pub is None else pd.Timestamp(end_pub).strftime("%Y-%m-%d"),
-            }
-
-            if start_pub is None or pd.isna(start_pub):
-                out["error"] = "start_pubDate_missing"
-                rows.append(out)
-                continue
-
-            res = compute_max_possible_return(code, start_pub, end_pub)
-            out.update(res)
+        if start_pub is None or pd.isna(start_pub):
+            out["error"] = "start_pubDate_missing"
             rows.append(out)
+            continue
 
-            if (i + 1) % 50 == 0:
-                print(f"Processed {i+1}/{len(selected)}")
+        res = compute_max_possible_return(code, start_pub, end_pub)
+        out.update(res)
+        rows.append(out)
 
-        detail = pd.DataFrame(rows)
+        if (i + 1) % 50 == 0:
+            print(f"Processed {i+1}/{len(selected)}")
 
-        # 输出明细
-        detail.to_csv(OUT_DETAIL_CSV, index=False, encoding="utf-8-sig")
-        print(f"[OK] 明细输出：{OUT_DETAIL_CSV}")
+    detail = pd.DataFrame(rows)
 
-        # 年度汇总（只统计无 error 的行）
-        ok = detail[detail.get("error").isna()].copy() if "error" in detail.columns else detail.copy()
-        if not ok.empty:
-            ok["max_return"] = pd.to_numeric(ok["max_return"], errors="coerce")
-            summary = ok.groupby("select_year").agg(
-                n=("code", "count"),
-                mean_max_return=("max_return", "mean"),
-                median_max_return=("max_return", "median"),
-                p90_max_return=("max_return", lambda s: s.quantile(0.9)),
-                max_of_max_return=("max_return", "max"),
-            ).reset_index()
+    # 输出明细
+    detail.to_csv(OUT_DETAIL_CSV, index=False, encoding="utf-8-sig")
+    print(f"[OK] 明细输出：{OUT_DETAIL_CSV}")
 
-            summary.to_csv(OUT_YEAR_SUMMARY_CSV, index=False, encoding="utf-8-sig")
-            print(f"[OK] 年度汇总输出：{OUT_YEAR_SUMMARY_CSV}")
-        else:
-            print("[WARN] 没有可用于汇总的有效记录（全部 error）")
+    # 年度汇总（只统计无 error 的行）
+    ok = detail[detail.get("error").isna()].copy() if "error" in detail.columns else detail.copy()
+    if not ok.empty:
+        ok["max_return"] = pd.to_numeric(ok["max_return"], errors="coerce")
+        summary = ok.groupby("select_year").agg(
+            n=("code", "count"),
+            mean_max_return=("max_return", "mean"),
+            median_max_return=("max_return", "median"),
+            p90_max_return=("max_return", lambda s: s.quantile(0.9)),
+            max_of_max_return=("max_return", "max"),
+        ).reset_index()
 
-    finally:
-        bs.logout()
+        summary.to_csv(OUT_YEAR_SUMMARY_CSV, index=False, encoding="utf-8-sig")
+        print(f"[OK] 年度汇总输出：{OUT_YEAR_SUMMARY_CSV}")
+    else:
+        print("[WARN] 没有可用于汇总的有效记录（全部 error）")
 
 
 if __name__ == "__main__":

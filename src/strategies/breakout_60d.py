@@ -1,7 +1,8 @@
 import os
 import pandas as pd
-import baostock as bs
 from tqdm import tqdm
+
+from src.data_collection import tushare_client as tsc
 
 # =========================
 # 配置区
@@ -41,29 +42,8 @@ def code_to_pure(code: str) -> str:
 
 
 def get_code_name_map() -> dict:
-    m = {}
-    rs = bs.query_stock_basic()
-    if rs.error_code == "0":
-        df = rs.get_data()
-        if df is not None and not df.empty and "code" in df.columns:
-            name_col = "code_name" if "code_name" in df.columns else ("name" if "name" in df.columns else None)
-            if name_col:
-                for c, n in zip(df["code"].astype(str), df[name_col].astype(str)):
-                    m[c] = n
-
-    if not m:
-        rs2 = bs.query_all_stock()
-        if rs2.error_code == "0":
-            df2 = rs2.get_data()
-            if df2 is not None and not df2.empty and "code" in df2.columns:
-                name_col = "code_name" if "code_name" in df2.columns else ("name" if "name" in df2.columns else None)
-                if name_col:
-                    for c, n in zip(df2["code"].astype(str), df2[name_col].astype(str)):
-                        m[c] = n
-        else:
-            print("警告：获取股票名称失败，将使用空 name。", rs2.error_msg)
-
-    return m
+    df = tsc.fetch_stock_basic()
+    return dict(zip(df["code"].astype(str), df["code_name"].astype(str)))
 
 
 def read_kline_parquet(path: str) -> pd.DataFrame:
@@ -310,64 +290,57 @@ def print_performance(title: str, perf: dict):
 def main():
     ensure_exists()
 
-    lg = bs.login()
-    if lg.error_code != "0":
-        raise RuntimeError(f"baostock login failed: {lg.error_msg}")
+    name_map = get_code_name_map()
 
-    try:
-        name_map = get_code_name_map()
+    for year in range(START_YEAR, END_YEAR + 1):
+        print(f"\n开始回测 {year} 年：")
 
-        for year in range(START_YEAR, END_YEAR + 1):
-            print(f"\n开始回测 {year} 年：")
+        files = [f for f in os.listdir(DATA_DIR) if f.endswith(".parquet")]
+        if not files:
+            raise FileNotFoundError(f"{DATA_DIR} 下没有 parquet 文件。")
 
-            files = [f for f in os.listdir(DATA_DIR) if f.endswith(".parquet")]
-            if not files:
-                raise FileNotFoundError(f"{DATA_DIR} 下没有 parquet 文件。")
+        all_trades_next_open = []
+        all_trades_next_close = []
 
-            all_trades_next_open = []
-            all_trades_next_close = []
+        for fn in tqdm(files, desc=f"Backtesting {year}"):
+            code_raw = fn.replace(".parquet", "")
+            code_p = code_to_pure(code_raw)
+            path = os.path.join(DATA_DIR, fn)
 
-            for fn in tqdm(files, desc=f"Backtesting {year}"):
-                code_raw = fn.replace(".parquet", "")
-                code_p = code_to_pure(code_raw)
-                path = os.path.join(DATA_DIR, fn)
+            df = read_kline_parquet(path)
+            if df.empty:
+                continue
 
-                df = read_kline_parquet(path)
-                if df.empty:
-                    continue
+            # 策略1：当日收盘买，次日开盘卖
+            trades_open = compute_trades_buyclose_sellnextopen(df, year)
+            if not trades_open.empty:
+                trades_open.insert(0, "code", code_p)
+                trades_open.insert(1, "name", name_map.get(code_raw, ""))
+                all_trades_next_open.append(trades_open)
 
-                # 策略1：当日收盘买，次日开盘卖
-                trades_open = compute_trades_buyclose_sellnextopen(df, year)
-                if not trades_open.empty:
-                    trades_open.insert(0, "code", code_p)
-                    trades_open.insert(1, "name", name_map.get(code_raw, ""))
-                    all_trades_next_open.append(trades_open)
+            # 策略2：当日收盘买，次日收盘卖
+            trades_close = compute_trades_buyclose_sellnextclose(df, year)
+            if not trades_close.empty:
+                trades_close.insert(0, "code", code_p)
+                trades_close.insert(1, "name", name_map.get(code_raw, ""))
+                all_trades_next_close.append(trades_close)
 
-                # 策略2：当日收盘买，次日收盘卖
-                trades_close = compute_trades_buyclose_sellnextclose(df, year)
-                if not trades_close.empty:
-                    trades_close.insert(0, "code", code_p)
-                    trades_close.insert(1, "name", name_map.get(code_raw, ""))
-                    all_trades_next_close.append(trades_close)
+        if all_trades_next_open:
+            out_open = pd.concat(all_trades_next_open, ignore_index=True)
+            perf_open = summarize_performance(out_open)
+            print_performance("策略1：当日收盘买入，次日开盘卖出", perf_open)
+        else:
+            print("\n策略1：当日收盘买入，次日开盘卖出")
+            print(f"{year} 年没有找到满足条件的交易。")
 
-            if all_trades_next_open:
-                out_open = pd.concat(all_trades_next_open, ignore_index=True)
-                perf_open = summarize_performance(out_open)
-                print_performance("策略1：当日收盘买入，次日开盘卖出", perf_open)
-            else:
-                print("\n策略1：当日收盘买入，次日开盘卖出")
-                print(f"{year} 年没有找到满足条件的交易。")
+        if all_trades_next_close:
+            out_close = pd.concat(all_trades_next_close, ignore_index=True)
+            perf_close = summarize_performance(out_close)
+            print_performance("策略2：当日收盘买入，次日收盘卖出", perf_close)
+        else:
+            print("\n策略2：当日收盘买入，次日收盘卖出")
+            print(f"{year} 年没有找到满足条件的交易。")
 
-            if all_trades_next_close:
-                out_close = pd.concat(all_trades_next_close, ignore_index=True)
-                perf_close = summarize_performance(out_close)
-                print_performance("策略2：当日收盘买入，次日收盘卖出", perf_close)
-            else:
-                print("\n策略2：当日收盘买入，次日收盘卖出")
-                print(f"{year} 年没有找到满足条件的交易。")
-
-    finally:
-        bs.logout()
 
 
 if __name__ == "__main__":
