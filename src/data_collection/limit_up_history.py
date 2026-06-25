@@ -3,7 +3,7 @@ import glob
 import pandas as pd
 from tqdm import tqdm
 
-from src.data_collection import tushare_client as tsc
+import tushare_client as tsc  # 同目录兄弟模块，直接按文件路径运行脚本时可直接 import
 
 # =========================
 # 配置区（跟你第一次脚本保持一致）

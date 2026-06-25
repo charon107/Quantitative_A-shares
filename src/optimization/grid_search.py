@@ -1,8 +1,14 @@
 import os
+import sys
 import math
 import itertools
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, Tuple, Optional, List
+
+project_root = Path(__file__).parent.parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
 import numpy as np
 import pandas as pd

@@ -10,7 +10,10 @@ from multiprocessing.pool import Pool
 import pandas as pd
 from tqdm import tqdm
 
-from src.data_collection import tushare_client as tsc
+# 与本文件同目录的兄弟模块：直接按文件路径 `python src/data_collection/stock_price.py`
+# 运行时，sys.path[0] 就是这个目录，无需 `from src.data_collection import`（那种写法
+# 要求项目根目录在 sys.path 里，但直接跑脚本文件不会自动满足这个条件）。
+import tushare_client as tsc
 
 # =========================
 # 配置区

@@ -6,6 +6,13 @@ E_TIME     = '20251218'                     # 结束日期：YYYYMMDD
 # ===========================================
 
 
+import sys
+from pathlib import Path
+
+project_root = Path(__file__).parent.parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
 import requests
 import pandas as pd
 import matplotlib.pyplot as plt
