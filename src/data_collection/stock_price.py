@@ -5,6 +5,7 @@ import signal
 import random
 import hashlib
 from datetime import datetime, timedelta
+from multiprocessing import Lock, Value
 from multiprocessing.pool import Pool
 
 import pandas as pd
@@ -24,9 +25,10 @@ BASE_DIR = "股价数据_parquet_fq"      # 数据保存根目录
 # 检查复权因子是否变化：每次运行回看最近 N 天（越大越保险，越慢一点）
 FACTOR_LOOKBACK_DAYS = 30
 
-# 并行抓取的进程数（tushare 是纯 HTTP 调用、按积分分级限频，不是 baostock 的
-# socket 连接限速；此默认值按 2000+ 积分档保守估计，积分更高可以调大）。
-WORKERS = int(os.environ.get("TUSHARE_WORKERS", "4"))
+# 并行抓取的进程数（tushare 是纯 HTTP 调用，真正的限速由 tushare_client 里
+# 跨进程共享的全局节流器保证，不会因为加 worker 而超过账号每分钟调用上限；
+# worker 数主要影响"等节流间隔的同时还能干多少解析/写盘活"）。
+WORKERS = int(os.environ.get("TUSHARE_WORKERS", "8"))
 
 # chunksize：主进程与 worker 间的 IPC 粒度（增大减少 pickle 轮次）
 CHUNKSIZE = int(os.environ.get("TUSHARE_CHUNKSIZE", "16"))
@@ -392,6 +394,12 @@ def _sigterm_handler(signum, frame):
     sys.exit(128 + signum)
 
 
+def _pool_init(rate_lock, rate_next_allowed):
+    """每个 worker 进程启动时，把跨进程共享的限流锁/状态注入 tushare_client，
+    让所有 worker 共用同一个全局调用速率。"""
+    tsc.configure_rate_limiter(rate_lock, rate_next_allowed)
+
+
 def _update_task(args):
     """进程池任务：更新单只股票，异常转成 ERROR 结果而非抛出（避免拖垮整个池）。
 
@@ -510,9 +518,15 @@ def main():
     # 避免 worker 进程成为孤儿。
     signal.signal(signal.SIGTERM, _sigterm_handler)
 
+    # 跨进程共享的限流锁/状态：所有 worker 共用同一个全局速率，不会因为开多个
+    # worker 就把账号每分钟调用上限叠加超标。
+    rate_lock = Lock()
+    rate_next_allowed = Value("d", 0.0)
+    tsc.configure_rate_limiter(rate_lock, rate_next_allowed)
+
     global _active_pool
     tasks = [(code, factor_check_start, factor_check_dates) for code in codes]
-    with Pool(processes=WORKERS) as pool:
+    with Pool(processes=WORKERS, initializer=_pool_init, initargs=(rate_lock, rate_next_allowed)) as pool:
         _active_pool = pool
         for r in tqdm(
             pool.imap(_update_task, tasks, chunksize=CHUNKSIZE),

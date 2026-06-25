@@ -19,8 +19,9 @@ jobs:
     # 关掉后回退到稳定的 https 下载/上传（download 与 upload 步骤都生效）。
     env:
       HF_HUB_DISABLE_XET: "1"
-      # tushare 并行抓取进程数（按积分分级限频，2000+ 积分档保守设置，被限流报错就调小）
-      TUSHARE_WORKERS: "4"
+      # tushare 并行抓取进程数：真正的限速由 tushare_client 的跨进程全局节流器
+      # 保证（见 TUSHARE_MAX_CALLS_PER_MIN），不会因为加 worker 而超过账号限频
+      TUSHARE_WORKERS: "8"
 
     steps:
       - uses: actions/checkout@v4
@@ -38,6 +39,8 @@ jobs:
       - name: Run incremental stock data update
         env:
           TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
+          # 第三方代理网关地址（如果 token 是 tushare 官方直发，留空这个 secret 即可）
+          TUSHARE_API_URL: ${{ secrets.TUSHARE_API_URL }}
         run: uv run python src/data_collection/stock_price.py
 
       - name: Upload updated data to HF

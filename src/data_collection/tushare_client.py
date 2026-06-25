@@ -14,17 +14,28 @@ import random
 import pandas as pd
 import tushare as ts
 
-# 个人 tushare token（去 tushare.pro 注册获取），由调用方自行配置环境变量
+# 个人 tushare token（去 tushare.pro 注册获取，或第三方代理分配的 token），
+# 由调用方自行配置环境变量
 TUSHARE_TOKEN = os.environ.get("TUSHARE_TOKEN", "")
+
+# 第三方代理的 API 地址（留空则用 tushare 官方默认地址 http://api.tushare.pro）。
+# 部分代理服务为了控量会分配独立 token + 独立网关地址，需要覆盖
+# DataApi 实例的私有属性 __http_url（Python 名称改写后是 _DataApi__http_url）。
+TUSHARE_API_URL = os.environ.get("TUSHARE_API_URL", "")
 
 # 重试配置：瞬时错误（网络波动/限流）指数退避重试
 MAX_RETRIES = int(os.environ.get("TUSHARE_MAX_RETRIES", "6"))
 BACKOFF_BASE = float(os.environ.get("TUSHARE_BACKOFF_BASE", "1.6"))
 BACKOFF_CAP = float(os.environ.get("TUSHARE_BACKOFF_CAP", "120"))
 
-# 请求间隔：按 2000+ 积分档保守设置，积分更高/更低可自行调整
+# 单进程场景下没有跨进程限流器时的退化节流（随机小延迟）
 MIN_PACE = float(os.environ.get("TUSHARE_MIN_PACE", "0.2"))
 MAX_PACE = float(os.environ.get("TUSHARE_MAX_PACE", "0.4"))
+
+# 账号限频：每分钟最多调用次数。多进程场景下用跨进程共享的全局间隔强制
+# 限速（不是每个进程各自独立限速，那样并发越多总速率越超标）。留 10% 余量。
+MAX_CALLS_PER_MIN = float(os.environ.get("TUSHARE_MAX_CALLS_PER_MIN", "100"))
+MIN_CALL_INTERVAL = 60.0 / (MAX_CALLS_PER_MIN * 0.9)
 
 # 命中这些关键字视为永久性错误（token 无效/权限不足/积分不够等），重试无意义，立即熔断；
 # 限流类报错（"频率"/"每分钟"）不在此列，仍走指数退避重试。
@@ -37,6 +48,23 @@ class TushareFatalError(RuntimeError):
 
 _pro_client = None
 
+# 跨进程共享的限流锁/状态（由 configure_rate_limiter 注入；未注入时退化为
+# 单进程随机延迟，见 _throttle）。
+_rate_lock = None
+_rate_next_allowed = None  # multiprocessing.Value('d', ...)：下一次允许调用的时间戳
+
+
+def configure_rate_limiter(lock, next_allowed):
+    """多进程场景下注入跨进程共享的限流锁 + 状态，让所有 worker 共用同一个全局速率。
+
+    lock/next_allowed 应为 multiprocessing.Lock()/multiprocessing.Value('d', 0.0)，
+    通过 Pool 的 initializer/initargs 传给每个 worker 进程（创建方式见
+    stock_price.py 的 main()）。
+    """
+    global _rate_lock, _rate_next_allowed
+    _rate_lock = lock
+    _rate_next_allowed = next_allowed
+
 
 def _pro():
     """懒加载的 tushare pro 客户端单例（纯 HTTP 客户端，无需登录/登出）。"""
@@ -46,11 +74,22 @@ def _pro():
             raise RuntimeError("环境变量 TUSHARE_TOKEN 未配置，无法调用 tushare。")
         ts.set_token(TUSHARE_TOKEN)
         _pro_client = ts.pro_api()
+        if TUSHARE_API_URL:
+            _pro_client._DataApi__http_url = TUSHARE_API_URL
     return _pro_client
 
 
-def _pace():
-    time.sleep(random.uniform(MIN_PACE, MAX_PACE))
+def _throttle():
+    """请求节流：配置了跨进程限流器时强制全局间隔，否则退化为单进程随机延迟。"""
+    if _rate_lock is None or _rate_next_allowed is None:
+        time.sleep(random.uniform(MIN_PACE, MAX_PACE))
+        return
+    with _rate_lock:
+        now = time.time()
+        wait = _rate_next_allowed.value - now
+        _rate_next_allowed.value = max(now, _rate_next_allowed.value) + MIN_CALL_INTERVAL
+    if wait > 0:
+        time.sleep(wait)
 
 
 def _to_ts_code(code: str) -> str:
@@ -83,7 +122,7 @@ def _call_with_retry(label: str, fn, *args, **kwargs):
     last_err = None
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            _pace()
+            _throttle()
             return fn(*args, **kwargs)
         except Exception as e:
             msg = str(e)
