@@ -13,15 +13,14 @@ concurrency:
 jobs:
   update:
     runs-on: ubuntu-latest
-    timeout-minutes: 120  # 覆盖冷启动全量拉取场景（~80分钟）
+    # 按交易日批量拉取全市场数据后，冷启动全量回补 ~375 个交易日 × 3 接口
+    # 在 90/min 限流下约 12-15 分钟，远低于之前逐股票请求的耗时，但留足余量。
+    timeout-minutes: 60
 
     # 关闭 HF 的 Xet 传输后端：1.20 的 xet 在 CI 拉大量小文件时会卡死，
     # 关掉后回退到稳定的 https 下载/上传（download 与 upload 步骤都生效）。
     env:
       HF_HUB_DISABLE_XET: "1"
-      # tushare 并行抓取进程数：真正的限速由 tushare_client 的跨进程全局节流器
-      # 保证（见 TUSHARE_MAX_CALLS_PER_MIN），不会因为加 worker 而超过账号限频
-      TUSHARE_WORKERS: "8"
 
     steps:
       - uses: actions/checkout@v4

@@ -110,6 +110,15 @@ def _from_ts_code(ts_code: str) -> str:
     return f"{exch.lower()}.{num}"
 
 
+def _from_ts_code_batch(df: pd.DataFrame, ts_code_col: str = "ts_code") -> pd.DataFrame:
+    """批量转换 ts_code -> code，丢掉不符合 sh/sz/bj 6 位数字格式的行（按日批量
+    接口偶尔会混入非普通股票的代码，丢弃比因为一行格式不对就整批报错更稳妥）。"""
+    mask = df[ts_code_col].astype(str).str.match(r"^\d{6}\.(SH|SZ|BJ)$")
+    df = df[mask].copy()
+    df["code"] = df[ts_code_col].apply(_from_ts_code)
+    return df
+
+
 def _to_ts_date(yyyy_mm_dd: str) -> str:
     """"2026-06-25" -> "20260625"；空字符串原样返回（表示不限制/到今天）。"""
     if not yyyy_mm_dd:
@@ -241,7 +250,7 @@ def compute_qfq(raw_df: pd.DataFrame, factor_df: pd.DataFrame, code: str) -> pd.
 
     out["code"] = code
     out["adjustflag"] = "2"
-    cols = ["date", "code", "open", "high", "low", "close", "volume", "amount", "pctChg", "adjustflag"]
+    cols = ["date", "code", "open", "high", "low", "close", "volume", "amount", "pctChg", "turn", "adjustflag"]
     out = out[[c for c in cols if c in out.columns]]
     return out.sort_values(["date"]).drop_duplicates(subset=["date"], keep="last").reset_index(drop=True)
 
@@ -272,6 +281,63 @@ def fetch_kline_qfq(code: str, start_date: str, end_date: str = "", fields: list
         keep = [c for c in fields if c in df.columns]
         df = df[keep]
     return df
+
+
+def fetch_daily_by_date(trade_date: str) -> pd.DataFrame:
+    """
+    一次请求拿全市场某一天的未复权日线（比逐股票查效率高得多——这也是
+    tushare/代理官方文档推荐的用法）。
+
+    返回 code/date/open/high/low/close/volume/amount/pctChg，trade_date
+    用 "YYYY-MM-DD"。
+    """
+    df = _call_with_retry(
+        f"fetch_daily_by_date({trade_date})",
+        _pro().daily,
+        trade_date=_to_ts_date(trade_date),
+    )
+    if df is None or df.empty:
+        return pd.DataFrame()
+    df = _from_ts_code_batch(df)
+    df["date"] = pd.to_datetime(df["trade_date"], format="%Y%m%d", errors="coerce")
+    df = df.rename(columns={"vol": "volume", "pct_chg": "pctChg"})
+    for col in ["open", "high", "low", "close", "volume", "amount", "pctChg"]:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    df = df.dropna(subset=["date"])
+    return df[["code", "date", "open", "high", "low", "close", "volume", "amount", "pctChg"]]
+
+
+def fetch_adj_factor_by_date(trade_date: str) -> pd.DataFrame:
+    """一次请求拿全市场某一天的复权因子。返回 code/trade_date/adj_factor。"""
+    df = _call_with_retry(
+        f"fetch_adj_factor_by_date({trade_date})",
+        _pro().adj_factor,
+        trade_date=_to_ts_date(trade_date),
+    )
+    if df is None or df.empty:
+        return pd.DataFrame()
+    df = _from_ts_code_batch(df)
+    df["trade_date"] = pd.to_datetime(df["trade_date"], format="%Y%m%d", errors="coerce")
+    df["adj_factor"] = pd.to_numeric(df["adj_factor"], errors="coerce")
+    df = df.dropna(subset=["trade_date"])
+    return df[["code", "trade_date", "adj_factor"]]
+
+
+def fetch_turnover_by_date(trade_date: str) -> pd.DataFrame:
+    """一次请求拿全市场某一天的换手率。返回 code/date/turn。"""
+    df = _call_with_retry(
+        f"fetch_turnover_by_date({trade_date})",
+        _pro().daily_basic,
+        trade_date=_to_ts_date(trade_date),
+        fields="ts_code,trade_date,turnover_rate",
+    )
+    if df is None or df.empty:
+        return pd.DataFrame()
+    df = _from_ts_code_batch(df)
+    df["date"] = pd.to_datetime(df["trade_date"], format="%Y%m%d", errors="coerce")
+    df["turn"] = pd.to_numeric(df["turnover_rate"], errors="coerce")
+    df = df.dropna(subset=["date"])
+    return df[["code", "date", "turn"]]
 
 
 def fetch_trade_dates(start_date: str, end_date: str) -> list:
