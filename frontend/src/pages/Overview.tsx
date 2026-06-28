@@ -6,6 +6,7 @@ import { RangeTabs, rangeDays, type RangeKey } from "../components/RangeTabs";
 import { ErrorState, Loading } from "../components/States";
 import { IndexLineChart } from "../charts/IndexLineChart";
 import { AdvanceDeclineChart } from "../charts/AdvanceDeclineChart";
+import { DayMoversPanel } from "../components/DayMoversPanel";
 import { fmtInt } from "../lib/format";
 
 const START = "2025-01-01";
@@ -18,12 +19,13 @@ function sliceByRange<T extends { date: string }>(pts: T[], range: RangeKey): T[
   return pts.filter((p) => new Date(p.date) >= cutoff);
 }
 
-export function Overview() {
+export function Overview({ onOpenStock }: { onOpenStock: (code: string) => void }) {
   const breadth = useBreadth();
   const ewi = useEqualWeightIndex(START);
   const series = useBreadthSeries();
   const [indexRange, setIndexRange] = useState<RangeKey>("3M");
   const [adRange, setAdRange] = useState<RangeKey>("3M");
+  const [pickedDate, setPickedDate] = useState<string | null>(null);
 
   const indexPoints = useMemo(() => sliceByRange(ewi.data ?? [], indexRange), [ewi.data, indexRange]);
   const adPoints = useMemo(() => sliceByRange(series.data ?? [], adRange), [series.data, adRange]);
@@ -78,10 +80,17 @@ export function Overview() {
         />
         <div className="px-2 pb-2">
           {series.isLoading ? <Loading /> : series.error ? <div className="p-4"><ErrorState error={series.error} /></div> : (
-            <AdvanceDeclineChart points={adPoints} />
+            <>
+              <p className="px-3 pb-1 text-xs text-muted">点击柱子查看当天上涨 / 下跌个股明细</p>
+              <AdvanceDeclineChart points={adPoints} onPick={setPickedDate} />
+            </>
           )}
         </div>
       </Card>
+
+      {pickedDate && (
+        <DayMoversPanel date={pickedDate} onClose={() => setPickedDate(null)} onOpenStock={onOpenStock} />
+      )}
     </div>
   );
 }

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pandas as pd
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 
 from src import metrics
 from src.api import schemas, services
@@ -38,3 +38,14 @@ def limit_up_down():
 def breadth_series():
     """每日市场涨跌家数（上涨/下跌/涨停/跌停）走势。"""
     return df_to_records(services.breadth_series())
+
+
+@router.get("/day-movers", response_model=schemas.DayMovers)
+def day_movers(date: str = Query(..., description="交易日 YYYY-MM-DD")):
+    """某交易日的上涨 / 下跌个股清单（名称、代码、开盘、最新、涨跌幅）。"""
+    df = services.day_movers(date)
+    if df.empty:
+        return schemas.DayMovers(date=date, up=[], down=[])
+    up = df[df["pctChg"] > 0]
+    down = df[df["pctChg"] < 0].sort_values("pctChg")  # 跌幅最大在前
+    return schemas.DayMovers(date=date, up=df_to_records(up), down=df_to_records(down))

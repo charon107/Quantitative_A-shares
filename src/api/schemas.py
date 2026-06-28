@@ -31,6 +31,20 @@ class BreadthPoint(BaseModel):
     limit_down: int
 
 
+class MoverRow(BaseModel):
+    code: str
+    code_name: str | None
+    open: float | None
+    close: float | None
+    pctChg: float | None
+
+
+class DayMovers(BaseModel):
+    date: str
+    up: list[MoverRow]
+    down: list[MoverRow]
+
+
 class KlinePoint(BaseModel):
     date: str
     open: float | None

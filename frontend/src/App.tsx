@@ -60,7 +60,7 @@ export default function App() {
       </header>
 
       <main className="mx-auto max-w-6xl px-5 py-7">
-        {page === "overview" && <Overview />}
+        {page === "overview" && <Overview onOpenStock={openStock} />}
         {page === "stock" && <StockQuery key={queryCode ?? "none"} initialCode={queryCode} />}
         {page === "rankings" && <Rankings onOpenStock={openStock} />}
         {page === "maDuration" && <MaDuration onOpenStock={openStock} />}

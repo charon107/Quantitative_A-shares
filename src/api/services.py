@@ -37,6 +37,16 @@ def breadth_series() -> pd.DataFrame:
     return res if res is not None else pd.DataFrame()
 
 
+def day_movers(date: str) -> pd.DataFrame:
+    res, _ = cache.try_load(
+        "load_day_movers",
+        relevant_params={"date": date},
+        fallback_fn=lambda: metrics.day_movers(date),
+        ttl=86400,
+    )
+    return res if res is not None else pd.DataFrame()
+
+
 def ma_duration() -> pd.DataFrame:
     res, _ = cache.try_load("load_ma_duration_samples", fallback_fn=metrics.ma_duration_samples, ttl=86400 * 7)
     return res if res is not None else pd.DataFrame()

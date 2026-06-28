@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import type {
   Breadth,
   BreadthPoint,
+  DayMovers,
   IndexPoint,
   LimitPoint,
   MaDuration,
@@ -38,6 +39,13 @@ export const useLimitUpDown = () =>
 
 export const useBreadthSeries = () =>
   useQuery({ queryKey: ["breadthSeries"], queryFn: () => get<BreadthPoint[]>("/market/breadth-series") });
+
+export const useDayMovers = (date: string | null) =>
+  useQuery({
+    queryKey: ["dayMovers", date],
+    queryFn: () => get<DayMovers>(`/market/day-movers?date=${date}`),
+    enabled: !!date,
+  });
 
 export const useRankings = (metric: RankMetric, n = 50, ascending = false) =>
   useQuery({

@@ -27,6 +27,20 @@ export interface BreadthPoint {
   limit_down: number;
 }
 
+export interface MoverRow {
+  code: string;
+  code_name: string | null;
+  open: number | null;
+  close: number | null;
+  pctChg: number | null;
+}
+
+export interface DayMovers {
+  date: string;
+  up: MoverRow[];
+  down: MoverRow[];
+}
+
 export interface KlinePoint {
   date: string;
   open: number | null;

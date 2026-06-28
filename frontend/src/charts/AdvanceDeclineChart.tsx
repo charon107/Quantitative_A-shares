@@ -2,7 +2,15 @@ import ReactECharts from "echarts-for-react";
 import type { BreadthPoint } from "../api/types";
 import { C, axisBase, baseOption, tooltipBase } from "../theme/echarts";
 
-export function AdvanceDeclineChart({ points, height = 340 }: { points: BreadthPoint[]; height?: number }) {
+export function AdvanceDeclineChart({
+  points,
+  onPick,
+  height = 340,
+}: {
+  points: BreadthPoint[];
+  onPick?: (date: string) => void;
+  height?: number;
+}) {
   const dates = points.map((p) => p.date);
   const up = points.map((p) => p.up);
   const down = points.map((p) => p.down);
@@ -52,5 +60,17 @@ export function AdvanceDeclineChart({ points, height = 340 }: { points: BreadthP
     ],
   });
 
-  return <ReactECharts option={option} style={{ height }} notMerge lazyUpdate />;
+  return (
+    <ReactECharts
+      option={option}
+      style={{ height }}
+      notMerge
+      lazyUpdate
+      onEvents={{
+        click: (p: { dataIndex?: number }) => {
+          if (onPick && p.dataIndex != null && points[p.dataIndex]) onPick(points[p.dataIndex].date);
+        },
+      }}
+    />
+  );
 }

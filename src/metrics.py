@@ -128,6 +128,24 @@ def breadth_series(
     return df
 
 
+def day_movers(date: str, path: str | None = None) -> pd.DataFrame:
+    """某交易日全部上涨/下跌个股（含名称、开盘价、收盘价、涨跌幅），按涨跌幅降序。
+
+    列：code / code_name / open / close / pctChg。
+    """
+    return db.query_df(
+        """
+        SELECT k.code, m.code_name, k.open, k.close, k.pctChg
+        FROM kline k
+        LEFT JOIN stock_meta m ON k.code = m.code
+        WHERE k.date = CAST(? AS DATE) AND k.pctChg <> 0
+        ORDER BY k.pctChg DESC
+        """,
+        [date],
+        path=path,
+    )
+
+
 def load_stock_kline(code: str, path: str | None = None) -> pd.DataFrame:
     """单只股票完整 K线（按日期升序）。无数据抛 LookupError。"""
     df = db.query_df(
