@@ -1,42 +1,33 @@
-# 大型数据目录（本地生成，不进 git）
-沪深主板微信指数/
-股价数据_parquet_fq/
-parquet_A股_2007-2024_Q4/
-parquet_A股_2007-2024_Q4.zip
-网格搜索涨停策略/bs_cache/
-网格搜索最严格涨停/bs_cache/
-ma5_ma10_duration_out/
-*.zip
-
-# Python
+# ===== Python =====
 .venv/
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
+.pytest_cache/
 
-# 系统文件
-.DS_Store
-
-# Excel 临时锁文件
-.~*.xlsx
-.~*.csv
-
-# IDE
-.idea/
-
-# 微信指数凭证（含敏感信息，不入库）
-config/wechat_search_config.ini
-.gstack/
-
-# DuckDB 数据库与入库状态（运行时生成，不进 git）
+# ===== DuckDB 数据库 / 入库状态（运行时生成，不入库）=====
 *.duckdb
 *.duckdb.new
 *.duckdb.wal
 ingest_state.json
 
-# 含服务器凭证的临时说明文件，绝不入库
-prompt.txt
+# ===== 数据目录（本地大文件，不入库）=====
+股价数据_parquet_fq/
+ma5_ma10_duration_out/
 
-# 前端构建产物与依赖
+# ===== 前端 =====
 frontend/node_modules/
 frontend/dist/
+frontend/.vite/
+
+# ===== 密钥 / 凭证（绝不入库）=====
+deploy/tushare.env
+prompt.txt
+
+# ===== 编辑器 / 工具 =====
+.idea/
+.vscode/
+.gstack/
+
+# ===== 系统文件 =====
+.DS_Store
+Thumbs.db
