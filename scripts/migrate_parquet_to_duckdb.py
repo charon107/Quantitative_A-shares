@@ -21,24 +21,27 @@ if _PROJECT_ROOT not in sys.path:
 
 from src import db  # noqa: E402
 
-KLINE_SELECT = """
-    INSERT OR REPLACE INTO kline
-        (code, date, open, high, low, close, volume, amount, pctChg, turn, adjustflag)
-    SELECT
-        code,
-        CAST(date AS DATE)            AS date,
-        CAST(open   AS DOUBLE),
-        CAST(high   AS DOUBLE),
-        CAST(low    AS DOUBLE),
-        CAST(close  AS DOUBLE),
-        CAST(volume AS DOUBLE),
-        CAST(amount AS DOUBLE),
-        CAST(pctChg AS DOUBLE),
-        CAST(turn   AS DOUBLE),
-        CAST(adjustflag AS VARCHAR)
-    FROM read_parquet(?, union_by_name=true)
-    WHERE code IS NOT NULL AND date IS NOT NULL
-"""
+
+def _build_kline_insert(conn) -> str:
+    """按 _src 视图的实际列动态生成 INSERT SELECT：缺失列填 NULL，adjustflag 默认 '2'。"""
+    cols = {r[0] for r in conn.execute("DESCRIBE _src").fetchall()}
+
+    def num(name: str) -> str:
+        return f"CAST({name} AS DOUBLE)" if name in cols else "NULL"
+
+    adjustflag = "CAST(adjustflag AS VARCHAR)" if "adjustflag" in cols else "'2'"
+    return f"""
+        INSERT OR REPLACE INTO kline
+            (code, date, open, high, low, close, volume, amount, pctChg, turn, adjustflag)
+        SELECT
+            code,
+            CAST(date AS DATE) AS date,
+            {num('open')}, {num('high')}, {num('low')}, {num('close')},
+            {num('volume')}, {num('amount')}, {num('pctChg')}, {num('turn')},
+            {adjustflag}
+        FROM _src
+        WHERE code IS NOT NULL AND date IS NOT NULL
+    """
 
 
 def migrate(base_dir: str, dest: str) -> None:
@@ -56,7 +59,11 @@ def migrate(base_dir: str, dest: str) -> None:
         db.init_schema(conn)
 
         print("[migrate] 导入 kline（read_parquet glob）...")
-        conn.execute(KLINE_SELECT, [kline_glob])
+        safe_glob = kline_glob.replace("'", "''")  # CREATE VIEW 不支持预处理参数，内联路径
+        conn.execute(
+            f"CREATE TEMP VIEW _src AS SELECT * FROM read_parquet('{safe_glob}', union_by_name=true)"
+        )
+        conn.execute(_build_kline_insert(conn))
         kline_rows = conn.execute("SELECT COUNT(*) FROM kline").fetchone()[0]
         n_codes = conn.execute("SELECT COUNT(DISTINCT code) FROM kline").fetchone()[0]
         max_date = conn.execute("SELECT MAX(date) FROM kline").fetchone()[0]
