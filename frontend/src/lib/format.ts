@@ -9,13 +9,18 @@ export const fmtPct = (v: number | null | undefined) =>
 export const fmtTurn = (v: number | null | undefined) =>
   v == null ? "—" : `${v.toFixed(2)}%`;
 
-// 成交额：元 -> 亿
+// 成交额：tushare amount 单位为「千元」-> 元 -> 亿/万
 export const fmtAmount = (v: number | null | undefined) => {
   if (v == null) return "—";
-  const yi = v / 1e8;
+  const yuan = v * 1000; // 千元 -> 元
+  const yi = yuan / 1e8;
   if (yi >= 1) return `${yi.toFixed(2)} 亿`;
-  return `${(v / 1e4).toFixed(0)} 万`;
+  return `${(yuan / 1e4).toFixed(0)} 万`;
 };
+
+// 成交量：tushare volume 单位为「手」-> 万手
+export const fmtVolume = (v: number | null | undefined) =>
+  v == null ? "—" : `${(v / 1e4).toFixed(2)} 万手`;
 
 export const fmtInt = (v: number | null | undefined) =>
   v == null ? "—" : v.toLocaleString("zh-CN");

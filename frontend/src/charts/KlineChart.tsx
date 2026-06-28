@@ -1,6 +1,8 @@
+import { memo, useEffect, useRef } from "react";
 import ReactECharts from "echarts-for-react";
-import type { EChartsOption } from "echarts";
+import type { EChartsOption, EChartsType } from "echarts";
 import type { KlinePoint } from "../api/types";
+import { computeRangeStats, type RangeStats } from "../lib/rangeStats";
 import { C, MA_COLORS, axisBase, baseOption, tooltipBase } from "../theme/echarts";
 
 interface Focus {
@@ -8,20 +10,37 @@ interface Focus {
   end: string;
 }
 
-export function KlineChart({
+function KlineChartImpl({
   points,
   focus,
+  rangeMode = false,
+  onRange,
   height = 460,
 }: {
   points: KlinePoint[];
   focus?: Focus | null;
+  rangeMode?: boolean;
+  onRange?: (stats: RangeStats | null) => void;
   height?: number;
 }) {
+  const chartRef = useRef<EChartsType | null>(null);
+
+  // 切换「区间统计」模式：开 -> 启用 lineX 框选；关 -> 清除并退出
+  useEffect(() => {
+    const inst = chartRef.current;
+    if (!inst) return;
+    if (rangeMode) {
+      inst.dispatchAction({ type: "takeGlobalCursor", key: "brush", brushOption: { brushType: "lineX", brushMode: "single" } });
+    } else {
+      inst.dispatchAction({ type: "brush", areas: [] });
+      inst.dispatchAction({ type: "takeGlobalCursor", key: "brush", brushOption: { brushType: false } });
+    }
+  }, [rangeMode]);
+
   const dates = points.map((p) => p.date);
-  // ECharts 蜡烛顺序：[open, close, low, high]
-  const candles = points.map((p) => [p.open, p.close, p.low, p.high]);
+  const candles = points.map((p) => [p.open, p.close, p.low, p.high]); // [open, close, low, high]
   const vols = points.map((p) => ({
-    value: p.volume == null ? 0 : p.volume / 1e4, // 万股
+    value: p.volume == null ? 0 : p.volume / 1e4, // 万手
     itemStyle: { color: (p.close ?? 0) >= (p.open ?? 0) ? `${C.up}99` : `${C.down}99` },
   }));
 
@@ -63,8 +82,7 @@ export function KlineChart({
     }
   }
 
-  const sign = (v: number | null | undefined) =>
-    v == null || v === 0 ? C.muted : v > 0 ? C.up : C.down;
+  const sign = (v: number | null | undefined) => (v == null || v === 0 ? C.muted : v > 0 ? C.up : C.down);
   const f2 = (v: number | null | undefined) => (v == null ? "—" : v.toFixed(2));
   const row = (label: string, val: string, color?: string) =>
     `<div style="display:flex;justify-content:space-between;gap:22px"><span style="color:${C.muted}">${label}</span><b style="color:${color ?? C.ink}">${val}</b></div>`;
@@ -87,7 +105,7 @@ export function KlineChart({
       row("MA20", f2(p.MA20), MA_COLORS[2]),
       row("MA60", f2(p.MA60), MA_COLORS[3]),
       `<div style="border-top:1px solid ${C.line};margin:5px 0"></div>`,
-      row("成交量", p.volume == null ? "—" : `${(p.volume / 1e4).toFixed(0)} 万股`),
+      row("成交量", p.volume == null ? "—" : `${(p.volume / 1e4).toFixed(2)} 万手`),
     ].join("");
   };
 
@@ -106,6 +124,17 @@ export function KlineChart({
       formatter: tooltipFormatter,
     },
     axisPointer: { link: [{ xAxisIndex: "all" }] },
+    // 区间框选（lineX，仅作用于 K线网格）
+    brush: {
+      xAxisIndex: 0,
+      brushType: "lineX",
+      brushMode: "single",
+      throttleType: "debounce",
+      throttleDelay: 150,
+      transformable: false,
+      removeOnClick: true,
+      brushStyle: { borderColor: C.clay, borderWidth: 1, color: "rgba(204,120,92,0.10)" },
+    },
     grid: [
       { left: 56, right: 18, top: 36, height: "62%" },
       { left: 56, right: 18, top: "74%", height: "16%" },
@@ -142,8 +171,8 @@ export function KlineChart({
         xAxisIndex: 0,
         yAxisIndex: 0,
         itemStyle: {
-          color: C.panel, // 阳线空心
-          color0: C.down, // 阴线实心
+          color: C.panel,
+          color0: C.down,
           borderColor: C.up,
           borderColor0: C.down,
           borderWidth: 1.2,
@@ -151,15 +180,36 @@ export function KlineChart({
         ...(markArea ? { markArea } : {}),
       },
       ...maSeries.map((s) => ({ ...s, xAxisIndex: 0, yAxisIndex: 0 })),
-      {
-        name: "成交量(万股)",
-        type: "bar",
-        data: vols,
-        xAxisIndex: 1,
-        yAxisIndex: 1,
-      },
+      { name: "成交量(万手)", type: "bar", data: vols, xAxisIndex: 1, yAxisIndex: 1 },
     ],
   });
 
-  return <ReactECharts option={option} style={{ height }} notMerge lazyUpdate />;
+  const handleBrushEnd = (params: { areas?: { coordRange?: number[] }[] }) => {
+    if (!onRange) return;
+    const area = params?.areas?.[0];
+    const cr = area?.coordRange;
+    if (!cr || cr.length < 2) {
+      onRange(null);
+      return;
+    }
+    onRange(computeRangeStats(points, Math.round(cr[0]), Math.round(cr[1])));
+  };
+
+  return (
+    <ReactECharts
+      option={option}
+      style={{ height }}
+      notMerge
+      lazyUpdate
+      onChartReady={(inst: EChartsType) => {
+        chartRef.current = inst;
+        if (rangeMode) {
+          inst.dispatchAction({ type: "takeGlobalCursor", key: "brush", brushOption: { brushType: "lineX", brushMode: "single" } });
+        }
+      }}
+      onEvents={{ brushEnd: handleBrushEnd }}
+    />
+  );
 }
+
+export const KlineChart = memo(KlineChartImpl);
