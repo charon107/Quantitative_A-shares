@@ -29,6 +29,12 @@ def equal_weight_index(start: str = services.DEFAULT_START):
     return series_to_points(services.equal_weight_index(start))
 
 
+@router.get("/shanghai-equal-weight-index", response_model=list[schemas.IndexPoint])
+def shanghai_equal_weight_index(start: str = services.DEFAULT_START):
+    """上证主板（sh.60xxxx）等权组合累计收益。"""
+    return series_to_points(services.shanghai_equal_weight_index(start))
+
+
 @router.get("/limit-up-down", response_model=list[schemas.LimitPoint])
 def limit_up_down():
     return df_to_records(services.limit_up_down())

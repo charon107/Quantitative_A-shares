@@ -27,6 +27,16 @@ def equal_weight_index(start_date: str = DEFAULT_START) -> pd.Series:
     return res if res is not None else pd.Series(dtype=float)
 
 
+def shanghai_equal_weight_index(start_date: str = DEFAULT_START) -> pd.Series:
+    res, _ = cache.try_load(
+        "load_shanghai_equal_weighted_index",
+        relevant_params={"start_date": start_date},
+        fallback_fn=lambda: metrics.shanghai_equal_weighted_index(start_date),
+        ttl=86400,
+    )
+    return res if res is not None else pd.Series(dtype=float)
+
+
 def limit_up_down() -> pd.DataFrame:
     res, _ = cache.try_load("load_limit_up_down", fallback_fn=metrics.limit_up_down_series, ttl=86400)
     return res if res is not None else pd.DataFrame()

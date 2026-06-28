@@ -35,6 +35,12 @@ export const useEqualWeightIndex = (start: string) =>
     queryFn: () => get<IndexPoint[]>(`/market/equal-weight-index?start=${start}`),
   });
 
+export const useShanghaiEqualWeightIndex = (start: string) =>
+  useQuery({
+    queryKey: ["shewi", start],
+    queryFn: () => get<IndexPoint[]>(`/market/shanghai-equal-weight-index?start=${start}`),
+  });
+
 export const useLimitUpDown = () =>
   useQuery({ queryKey: ["lud"], queryFn: () => get<LimitPoint[]>("/market/limit-up-down") });
 

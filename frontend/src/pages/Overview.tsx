@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useBreadth, useBreadthSeries, useEqualWeightIndex, useLimitUpDown } from "../api/client";
+import { useBreadth, useBreadthSeries, useEqualWeightIndex, useShanghaiEqualWeightIndex, useLimitUpDown } from "../api/client";
 import { Card, CardHeader } from "../components/Card";
 import { KpiCard } from "../components/KpiCard";
 import { RangeTabs, rangeDays, type RangeKey } from "../components/RangeTabs";
@@ -23,6 +23,7 @@ function sliceByRange<T extends { date: string }>(pts: T[], range: RangeKey): T[
 export function Overview({ onOpenStock }: { onOpenStock: (code: string) => void }) {
   const breadth = useBreadth();
   const ewi = useEqualWeightIndex(START);
+  const shewi = useShanghaiEqualWeightIndex(START);
   const series = useBreadthSeries();
   const lud = useLimitUpDown();
   const [indexRange, setIndexRange] = useState<RangeKey>("3M");
@@ -30,7 +31,8 @@ export function Overview({ onOpenStock }: { onOpenStock: (code: string) => void 
   const [ludRange, setLudRange] = useState<RangeKey>("3M");
   const [pickedDate, setPickedDate] = useState<string | null>(null);
 
-  const indexPoints = useMemo(() => sliceByRange(ewi.data ?? [], indexRange), [ewi.data, indexRange]);
+  const ewiPoints = useMemo(() => sliceByRange(ewi.data ?? [], indexRange), [ewi.data, indexRange]);
+  const shewiPoints = useMemo(() => sliceByRange(shewi.data ?? [], indexRange), [shewi.data, indexRange]);
   const adPoints = useMemo(() => sliceByRange(series.data ?? [], adRange), [series.data, adRange]);
   const ludPoints = useMemo(() => sliceByRange(lud.data ?? [], ludRange), [lud.data, ludRange]);
 
@@ -62,13 +64,18 @@ export function Overview({ onOpenStock }: { onOpenStock: (code: string) => void 
 
       <Card>
         <CardHeader
-          title="等权指数走势"
-          subtitle="全市场等权组合累计收益"
+          title="指数走势"
+          subtitle="全市场等权 + 上证主板等权累计收益"
           right={<RangeTabs value={indexRange} onChange={setIndexRange} />}
         />
         <div className="px-2 pb-2">
           {ewi.isLoading ? <Loading /> : ewi.error ? <div className="p-4"><ErrorState error={ewi.error} /></div> : (
-            <IndexLineChart points={indexPoints} />
+            <IndexLineChart
+              series={[
+                { name: "全市场等权", points: ewiPoints, color: "#cc785c" },
+                { name: "上证等权", points: shewiPoints, color: "#3b82f6" },
+              ]}
+            />
           )}
         </div>
       </Card>

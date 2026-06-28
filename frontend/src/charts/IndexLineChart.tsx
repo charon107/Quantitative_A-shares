@@ -2,40 +2,85 @@ import ReactECharts from "echarts-for-react";
 import type { IndexPoint } from "../api/types";
 import { C, axisBase, baseOption, tooltipBase } from "../theme/echarts";
 
-export function IndexLineChart({ points, height = 320 }: { points: IndexPoint[]; height?: number }) {
-  const dates = points.map((p) => p.date);
-  const vals = points.map((p) => (p.value == null ? null : +(p.value * 100).toFixed(2)));
+export interface SeriesConfig {
+  name: string;
+  points: IndexPoint[];
+  color: string;
+}
+
+export function IndexLineChart({
+  series,
+  points,
+  height = 340,
+}: {
+  series?: SeriesConfig[];
+  /** @deprecated single-series shorthand */
+  points?: IndexPoint[];
+  height?: number;
+}) {
+  // Back-compat: single `points` prop → one series
+  const resolved: SeriesConfig[] = series
+    ? series
+    : points
+      ? [{ name: "全市场等权", points, color: C.clay }]
+      : [];
+
+  if (!resolved.length) return null;
+
+  // Shared date axis from the longest series
+  const longest = resolved.reduce((a, b) =>
+    a.points.length >= b.points.length ? a : b,
+  );
+  const dates = longest.points.map((p) => p.date);
+
+  const seriesDefs = resolved.map((s) => {
+    const valMap = new Map(s.points.map((p) => [p.date, +(p.value! * 100).toFixed(2)]));
+    const data = dates.map((d) => valMap.get(d) ?? null);
+
+    return {
+      name: s.name,
+      type: "line" as const,
+      data,
+      smooth: true,
+      showSymbol: false,
+      lineStyle: { color: s.color, width: 2 },
+      itemStyle: { color: s.color },
+    };
+  });
+
+  const tooltipFormatter = (params: { seriesName: string; dataIndex: number; value: number | null }[]) => {
+    const i = params?.[0]?.dataIndex ?? 0;
+    const rows = params
+      .filter((s) => s.value != null)
+      .map(
+        (s) =>
+          `<div style="display:flex;justify-content:space-between;gap:22px"><span style="color:${C.muted}">${s.seriesName}</span><b>${s.value}%</b></div>`,
+      )
+      .join("");
+    return `<div style="font-weight:600;margin-bottom:4px">${dates[i]}</div>${rows}`;
+  };
 
   const option = baseOption({
-    grid: { left: 52, right: 18, top: 18, bottom: 28 },
+    legend: {
+      data: seriesDefs.map((s) => s.name),
+      top: 0,
+      textStyle: { color: C.muted, fontSize: 11 },
+      itemWidth: 24,
+      itemHeight: 2,
+    },
+    grid: { left: 52, right: 18, top: 30, bottom: 28 },
     tooltip: {
       trigger: "axis",
-      valueFormatter: (v: number) => `${v}%`,
-      axisPointer: { type: "line", lineStyle: { color: C.muted, type: "dashed" } },
       ...tooltipBase,
+      formatter: tooltipFormatter,
     },
     xAxis: { type: "category", data: dates, boundaryGap: false, ...axisBase },
-    yAxis: { type: "value", ...axisBase, axisLabel: { ...axisBase.axisLabel, formatter: "{value}%" } },
-    series: [
-      {
-        type: "line",
-        data: vals,
-        smooth: true,
-        showSymbol: false,
-        lineStyle: { color: C.clay, width: 2 },
-        itemStyle: { color: C.clay },
-        areaStyle: {
-          color: {
-            type: "linear",
-            x: 0, y: 0, x2: 0, y2: 1,
-            colorStops: [
-              { offset: 0, color: "rgba(204,120,92,0.20)" },
-              { offset: 1, color: "rgba(204,120,92,0.02)" },
-            ],
-          },
-        },
-      },
-    ],
+    yAxis: {
+      type: "value",
+      ...axisBase,
+      axisLabel: { ...axisBase.axisLabel, formatter: "{value}%" },
+    },
+    series: seriesDefs,
   });
 
   return <ReactECharts option={option} style={{ height }} notMerge lazyUpdate />;

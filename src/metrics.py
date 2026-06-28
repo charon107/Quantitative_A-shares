@@ -71,6 +71,32 @@ def equal_weighted_index(start_date: str = "2025-01-01", path: str | None = None
     return (1 + s).cumprod() - 1
 
 
+# ========== 上证等权指数（仅 sh.60xxxx） ==========
+def shanghai_equal_weighted_index(start_date: str = "2025-01-01", path: str | None = None) -> pd.Series:
+    """上证主板等权组合累计收益（仅 sh.60xxxx）。index=日期，value=累计收益率。"""
+    daily = db.query_df(
+        """
+        WITH r AS (
+            SELECT date,
+                   close / LAG(close) OVER (PARTITION BY code ORDER BY date) - 1 AS ret
+            FROM kline
+            WHERE code LIKE 'sh.6%'
+        )
+        SELECT date, AVG(ret) AS daily_return
+        FROM r
+        WHERE ret IS NOT NULL AND date >= ?
+        GROUP BY date
+        ORDER BY date
+        """,
+        [start_date],
+        path=path,
+    )
+    if daily.empty:
+        return pd.Series(dtype=float)
+    s = daily.set_index("date")["daily_return"].astype(float)
+    return (1 + s).cumprod() - 1
+
+
 # ========== 涨停/跌停家数 ==========
 def limit_up_down_series(
     up_threshold: float = 9.9,
