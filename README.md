@@ -1,105 +1,94 @@
-# WechatNum — A股量化交易研究
+# WechatNum — A股股价看板
 
-基于微信指数 + 涨停策略的 A 股量化研究框架。核心思路：用微信指数衡量市场对某股票的关注热度，结合涨停信号做量化选股与回测。
+前复权日线行情看板。数据源 tushare，存储 **DuckDB**，后端 **FastAPI**，前端 **React (Vite + Tailwind + ECharts)**，Anthropic 浅色暖调设计。
+
+## 架构
+
+```
+tushare ──每日入库──▶ DuckDB(market.duckdb, 服务器唯一真源)
+                          │ 只读连接 + SQL 聚合
+                          ▼
+React SPA  ◀── JSON ── FastAPI(/api/*) ◀── Redis L2 缓存(重算结果)
+   (静态 dist/ 由 FastAPI 同进程托管, 端口 8501)
+```
+
+- **数据库**：DuckDB 单文件，列式聚合，零常驻开销（适配小内存服务器）。
+- **缓存**：Redis L2（重算结果序列化为 parquet bytes）；不可用时优雅降级为实时计算。
+- **前端**：纯 SPA，构建成静态 `dist/` 由 FastAPI 同进程托管，运行时无 Node。
 
 ## 目录结构
 
 ```
-WechatNum/
-├── src/
-│   ├── data_collection/     # 数据采集
-│   │   ├── wechat_index.py      # 微信指数批量爬取（自动增量更新）
-│   │   ├── wechat_index_gui.py  # 微信指数爬取（原版/GUI）
-│   │   ├── stock_price.py       # A股日线前复权 K线更新（tushare）
-│   │   ├── limit_up_updater.py  # 涨停池更新（akshare，追加到 data/limit_up/）
-│   │   └── limit_up_history.py  # 历史涨停生成（从 parquet 扫描）
-│   ├── strategies/          # 交易策略回测
-│   │   ├── limit_up_ma.py       # 涨停+MA多头策略（主策略）
-│   │   ├── breakout_60d.py      # 60日高点突破策略
-│   │   ├── next_day_open.py     # 昨日触及涨停次日开盘买入
-│   │   └── next_day_failed_zt.py # 昨日触及涨停但未封板次日策略
-│   ├── optimization/        # 参数优化
-│   │   └── grid_search.py       # 网格搜索（持有期/止盈止损）
-│   ├── analysis/            # 数据分析
-│   │   ├── wechat_backtest.py   # 微信指数大回测
-│   │   ├── surf_return.py       # SURF 选股收益计算
-│   │   └── parquet_columns.py   # parquet 字段查看工具
-│   └── visualization/       # 可视化
-│       ├── wechat_plot.py       # 单股微信指数曲线
-│       ├── kline_wechat_plot.py # K线+成交量+微信指数三联图
-│       ├── surf_kline_plot.py   # SURF 选股股价图
-│       └── batch_plot.py        # 批量绘图
-├── data/
-│   ├── limit_up/
-│   │   ├── 2023.csv             # 2023年涨停记录
-│   │   ├── 2024.csv             # 2024年涨停记录
-│   │   └── 2025_2026.csv        # 2025-2026年涨停记录（持续更新）
-│   └── concepts/
-│       └── ths_concept_board.csv # 同花顺概念板块
-├── results/                 # 回测结果（按年分类）
-│   ├── 2022/
-│   ├── 2023/
-│   ├── 2024/
-│   └── 2025/
-├── config/
-│   └── wechat_search_config.ini # 微信指数 API 凭证（本地保留，不入库）
-├── pyproject.toml
-└── uv.lock
+src/
+├── db.py                       # DuckDB 仓储层（只读短连接 / 入库 upsert / 原子替换）
+├── metrics.py                  # 纯计算（SQL 聚合，被 API 复用）
+├── cache.py                    # Redis L2 缓存
+├── api/                        # FastAPI：main + schemas + routes(market/stocks/rankings/analytics)
+├── analysis/ma5_above_ma10_duration.py   # MA5>MA20 多头时长统计（纯函数）
+└── data_collection/
+    ├── stock_price.py          # tushare → DuckDB 增量入库
+    └── tushare_client.py       # tushare 封装（token/限流/熔断/前复权）
+frontend/                       # Vite + React + TS + Tailwind + ECharts
+scripts/migrate_parquet_to_duckdb.py   # 一次性：旧 parquet → DuckDB
+deploy/                         # systemd 单元 + 数据刷新 + 缓存预热
+tests/                          # pytest（metrics + API + 分析）
 ```
 
-> **大型数据目录**（`沪深主板微信指数/`、`股价数据_parquet_fq/`、`parquet_A股_2007-2024_Q4/`）不进 git，在 `.gitignore` 中排除。
+## 本地开发
 
-## 快速开始
-
-### 1. 安装依赖
+### 后端
 
 ```bash
-uv sync
+uv sync --all-extras
+
+# 首次：从历史 parquet 建库（或在服务器已迁移好的库上跳过）
+uv run python scripts/migrate_parquet_to_duckdb.py --base-dir 股价数据_parquet_fq --dest market.duckdb
+
+# 启动 API（开发期 8000）
+DUCKDB_PATH=market.duckdb uv run uvicorn src.api.main:app --reload --port 8000
 ```
 
-### 2. 配置微信指数凭证
-
-编辑 `config/wechat_search_config.ini`：
-
-```ini
-[DEFAULT]
-openid = <你的openid>
-search_key = <你的search_key>
-```
-
-凭证获取方式：用 **Fiddler** 对微信小程序抓包，找 `search.weixin.qq.com/cgi-bin/wxaweb/wxindex` 的请求 Body。凭证约每周失效，需重新抓取。
-
-### 3. 采集数据
+### 前端
 
 ```bash
-# 更新微信指数（增量）
-.venv\Scripts\python.exe src/data_collection/wechat_index.py
-
-# 更新 A 股日线 K 线
-.venv\Scripts\python.exe src/data_collection/stock_price.py
-
-# 更新涨停记录（当日到今天）
-.venv\Scripts\python.exe src/data_collection/limit_up_updater.py
+cd frontend
+npm install
+npm run dev            # http://localhost:5173 ，/api 代理到 127.0.0.1:8000
 ```
 
-### 4. 运行策略回测
+### 生产构建（前端静态产物，本地/CI 构建，不在服务器跑 Node）
 
 ```bash
-# 涨停 + MA 多头策略（主策略）
-.venv\Scripts\python.exe src/strategies/limit_up_ma.py
-
-# 60日高点突破策略
-.venv\Scripts\python.exe src/strategies/breakout_60d.py
+cd frontend && npm run build      # 产出 frontend/dist/
+# 之后 FastAPI 会自动托管 dist/（见 src/api/main.py）
 ```
 
-### 5. 参数优化
+## API
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/market/breadth` | 市场宽度（涨跌家数 / 涨跌比） |
+| GET | `/api/market/equal-weight-index?start=` | 等权指数累计收益 |
+| GET | `/api/market/limit-up-down` | 每日涨停/跌停家数 |
+| GET | `/api/stocks/search?q=` | 代码/名称模糊搜索 |
+| GET | `/api/stocks/{code}/kline` | 个股 K线（含 MA5/10/20/60） |
+| GET | `/api/stocks/{code}/volatility?window=` | 滚动年化波动率 |
+| GET | `/api/rankings?metric=&n=&ascending=` | 排行榜（pctChg/amount/turn） |
+| GET | `/api/ma-duration` | MA5>MA20 多头时长分布 |
+| GET | `/api/status` | 数据新鲜度 / 覆盖 / Redis 状态 |
+
+## 数据更新
+
+每日由 systemd timer 触发 `deploy/refresh_data.sh`：跑 `stock_price.py`（tushare → DuckDB 增量入库）→ 清 Redis 缓存。需在服务器配置环境变量 `TUSHARE_TOKEN`（及可选 `TUSHARE_API_URL` 代理网关）。
+
+## 部署
+
+见 [deploy/README.md](deploy/README.md)。要点：服务器装 DuckDB（`uv sync`）、建库、`api.service` 跑 uvicorn 托管 `/api` + 前端 `dist/`，Redis 做缓存。
+
+## 测试
 
 ```bash
-# 先确保 results/2025/full_year_backtest_enhanced.xlsx 存在
-.venv\Scripts\python.exe src/optimization/grid_search.py
+uv run pytest          # metrics（DuckDB 夹具）+ API（TestClient）+ 分析纯函数
 ```
 
-## 注意事项
-
-- 所有脚本需从**项目根目录**运行（保证相对路径正确）
-- 微信指数凭证不入 git，仅存 `config/wechat_search_config.ini`（已加入 .gitignore）
+> 仅供量化研究，不构成投资建议。

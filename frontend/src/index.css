@@ -1,0 +1,40 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  body {
+    @apply bg-cream text-ink font-sans antialiased;
+  }
+  h1, h2, h3 {
+    @apply font-serif;
+  }
+  /* 等宽数字，金融表格对齐 */
+  .nums {
+    font-feature-settings: "tnum" 1;
+    @apply font-mono;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-panel border border-line rounded-2xl shadow-soft;
+  }
+  .card-pad {
+    @apply p-5;
+  }
+}
+
+/* 自定义滚动条（暖灰） */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: #DCD6C9; border-radius: 6px; }
+::-webkit-scrollbar-thumb:hover { background: #CFC8B8; }
+::-webkit-scrollbar-track { background: transparent; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}

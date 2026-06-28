@@ -3,7 +3,7 @@ import os, sys, time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ["REDIS_URL"] = "redis://127.0.0.1:6379/0"
 
-from src.visualization.redis_cache import try_load, is_available
+from src.cache import try_load, is_available
 
 print(f"Redis: {is_available()}")
 

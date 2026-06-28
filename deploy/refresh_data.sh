@@ -1,27 +1,24 @@
 #!/bin/bash
-# 服务器定时任务：从 Hugging Face 拉取最新数据
+# 服务器定时任务：从 tushare 增量入库到 DuckDB，并清空 Redis 缓存。
+#
+# 需要环境变量 TUSHARE_TOKEN（及可选 TUSHARE_API_URL 代理网关）。
 
-set -e  # 任何错误则退出
-
-export HF_TOKEN="${HF_TOKEN:-}"  # 从环境变量读取 token
-
-if [ -z "$HF_TOKEN" ]; then
-    echo "ERROR: HF_TOKEN not set"
-    exit 1
-fi
+set -e
 
 cd "$(dirname "$0")/.."  # 进入项目根目录
 
-echo "[$(date '+%Y-%m-%d %H:%M:%S')] Starting data refresh..."
-
-# 使用 uv run 执行 hf_sync download
-uv run python -m src.data_collection.hf_sync download
-
-if [ $? -eq 0 ]; then
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Data refresh completed successfully"
-    # 数据更新后清空 Redis 缓存，下次页面加载从新数据重算
-    uv run python -m src.data_collection.hf_sync clear-redis-cache || true
-else
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Data refresh failed"
+if [ -z "${TUSHARE_TOKEN:-}" ]; then
+    echo "ERROR: TUSHARE_TOKEN 未设置"
     exit 1
 fi
+
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] 开始入库（tushare -> DuckDB）..."
+uv run python -m src.data_collection.stock_price
+
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] 入库完成，清空 Redis 缓存..."
+uv run python -m src.cache clear || true
+
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] 预热 Redis 缓存..."
+uv run python deploy/warmup_redis.py || true
+
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] 完成。"

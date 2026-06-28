@@ -43,11 +43,11 @@ else
     echo "[$(ts)] 依赖无变更，跳过 uv sync。"
 fi
 
-# 3) 重启看板服务
-echo "[$(ts)] 重启 dashboard 服务 ..."
-$SYSTEMCTL restart dashboard
+# 3) 重启 API 服务
+echo "[$(ts)] 重启 api 服务 ..."
+$SYSTEMCTL restart api
 
 # 4) 显示服务状态
 sleep 2
-$SYSTEMCTL --no-pager --full status dashboard | head -n 12 || true
+$SYSTEMCTL --no-pager --full status api | head -n 12 || true
 echo "[$(ts)] 完成。访问 http://47.109.138.67:8501 （强制刷新 Ctrl+F5 避开缓存）"

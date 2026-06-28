@@ -1,26 +1,25 @@
 [project]
 name = "wechatnum"
-version = "0.1.0"
-description = "A股量化交易研究：微信指数 + 涨停策略 + 回测分析"
+version = "2.0.0"
+description = "A股股价看板：DuckDB + FastAPI + React，前复权日线可视化"
 requires-python = ">=3.11"
 dependencies = [
-    "requests",
     "pandas",
-    "akshare",
-    "tqdm",
     "numpy",
-    "matplotlib",
-    "openpyxl",
     "pyarrow",
-    "huggingface-hub",
-    "streamlit",
-    "plotly",
-    "streamlit-searchbox>=0.1.24",
+    "tqdm",
+    "matplotlib",
+    "requests",
     "redis>=5.0.0,<6",
     "tushare>=1.4.29",
+    "duckdb>=1.0",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "pydantic>=2.6",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest",
+    "httpx",
 ]
