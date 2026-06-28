@@ -107,8 +107,21 @@ def next_day(yyyy_mm_dd: str) -> str:
     return (d + timedelta(days=1)).strftime("%Y-%m-%d")
 
 
+def _db_latest_date() -> str | None:
+    """DuckDB 中 kline 的最新日期（迁移后无 state 文件时作为续传基线）。"""
+    if not db.database_exists():
+        return None
+    try:
+        with db.connect(read_only=True) as conn:
+            row = conn.execute("SELECT MAX(date) FROM kline").fetchone()
+        return row[0].strftime("%Y-%m-%d") if row and row[0] else None
+    except Exception:
+        return None
+
+
 def determine_needed_dates(state: dict) -> list[str]:
-    last_complete = state.get("last_complete_date")
+    # 优先用 state；缺失时从 DuckDB 现有最新日期续传，避免迁移后从头重拉
+    last_complete = state.get("last_complete_date") or _db_latest_date()
     start = next_day(last_complete) if last_complete else START_DATE
     today = datetime.today().strftime("%Y-%m-%d")
     if start > today:

@@ -16,6 +16,7 @@ export default {
         clayDark: "#BD5D3A", // 强调 hover
         up: "#3A8C5F", // 上涨（沉稳绿）
         down: "#C84B31", // 下跌（陶红）
+        amber: "#D9A441", // 警示 / 未结束样本
       },
       fontFamily: {
         serif: ['"Source Serif 4"', '"Noto Serif SC"', "Georgia", "serif"],

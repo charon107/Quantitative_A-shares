@@ -5,10 +5,20 @@
 
 set -e
 
-cd "$(dirname "$0")/.."  # 进入项目根目录
+HERE="$(cd "$(dirname "$0")" && pwd)"
+cd "$HERE/.."  # 进入项目根目录
+
+# 加载 token 等凭证（供 SSH 非登录 shell / CI 触发时使用）
+if [ -f "$HERE/tushare.env" ]; then
+    set -a
+    . "$HERE/tushare.env"
+    set +a
+fi
+# 确保 uv 在 PATH（CI/cron 的精简 PATH 里可能没有）
+export PATH="/root/.local/bin:$PATH"
 
 if [ -z "${TUSHARE_TOKEN:-}" ]; then
-    echo "ERROR: TUSHARE_TOKEN 未设置"
+    echo "ERROR: TUSHARE_TOKEN 未设置（检查 deploy/tushare.env）"
     exit 1
 fi
 

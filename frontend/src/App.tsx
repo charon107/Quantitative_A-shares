@@ -18,7 +18,14 @@ type PageKey = (typeof PAGES)[number]["key"];
 
 export default function App() {
   const [page, setPage] = useState<PageKey>("overview");
+  const [queryCode, setQueryCode] = useState<string | null>(null);
   const status = useStatus();
+
+  // 从排行榜 / 多头时长点击公司名 -> 跳转个股查询并载入该股
+  const openStock = (code: string) => {
+    setQueryCode(code);
+    setPage("stock");
+  };
 
   return (
     <div className="min-h-screen bg-cream">
@@ -27,7 +34,6 @@ export default function App() {
           <div className="flex items-baseline gap-3">
             <span className="h-5 w-5 rounded-md bg-clay" aria-hidden />
             <h1 className="text-xl font-semibold tracking-tight">A股股价看板</h1>
-            <span className="hidden text-sm text-muted sm:inline">微信指数量化研究</span>
           </div>
           {status.data?.latest_date && (
             <span className="nums text-xs text-muted">
@@ -55,15 +61,11 @@ export default function App() {
 
       <main className="mx-auto max-w-6xl px-5 py-7">
         {page === "overview" && <Overview />}
-        {page === "stock" && <StockQuery />}
-        {page === "rankings" && <Rankings />}
-        {page === "maDuration" && <MaDuration />}
+        {page === "stock" && <StockQuery key={queryCode ?? "none"} initialCode={queryCode} />}
+        {page === "rankings" && <Rankings onOpenStock={openStock} />}
+        {page === "maDuration" && <MaDuration onOpenStock={openStock} />}
         {page === "status" && <Status />}
       </main>
-
-      <footer className="mx-auto max-w-6xl px-5 py-8 text-center text-xs text-muted">
-        DuckDB · FastAPI · React — 前复权日线，仅供研究，不构成投资建议。
-      </footer>
     </div>
   );
 }

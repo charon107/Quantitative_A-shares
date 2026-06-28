@@ -3,6 +3,7 @@ import { useKline, useRankings } from "../api/client";
 import type { RankMetric } from "../api/types";
 import { Card, CardHeader } from "../components/Card";
 import { ErrorState, Loading } from "../components/States";
+import { ExpandToggle } from "../components/ExpandToggle";
 import { KlineChart } from "../charts/KlineChart";
 import { fmtAmount, fmtPct, fmtPrice, fmtTurn, signClass } from "../lib/format";
 
@@ -14,11 +15,17 @@ const TABS: Tab[] = [
   { key: "turn", label: "换手率", metric: "turn", asc: false },
 ];
 
-export function Rankings() {
+const INITIAL_ROWS = 10;
+
+export function Rankings({ onOpenStock }: { onOpenStock: (code: string) => void }) {
   const [tab, setTab] = useState<Tab>(TABS[0]);
   const [picked, setPicked] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
   const q = useRankings(tab.metric, 50, tab.asc);
   const kline = useKline(picked);
+
+  const rows = q.data ?? [];
+  const shown = expanded ? rows : rows.slice(0, INITIAL_ROWS);
 
   return (
     <div className="space-y-6">
@@ -31,7 +38,10 @@ export function Rankings() {
               {TABS.map((t) => (
                 <button
                   key={t.key}
-                  onClick={() => setTab(t)}
+                  onClick={() => {
+                    setTab(t);
+                    setExpanded(false);
+                  }}
                   className={`rounded-md px-3 py-1 text-xs font-medium transition ${
                     tab.key === t.key ? "bg-panel text-clay shadow-soft" : "text-muted hover:text-ink"
                   }`}
@@ -48,40 +58,58 @@ export function Rankings() {
           ) : q.error ? (
             <div className="p-4"><ErrorState error={q.error} /></div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-line text-left text-xs text-muted">
-                    <th className="px-3 py-2 font-medium">#</th>
-                    <th className="px-3 py-2 font-medium">名称</th>
-                    <th className="px-3 py-2 font-medium">代码</th>
-                    <th className="px-3 py-2 text-right font-medium">最新价</th>
-                    <th className="px-3 py-2 text-right font-medium">涨跌幅</th>
-                    <th className="px-3 py-2 text-right font-medium">成交额</th>
-                    <th className="px-3 py-2 text-right font-medium">换手率</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(q.data ?? []).map((row, i) => (
-                    <tr
-                      key={row.code}
-                      onClick={() => setPicked(row.code)}
-                      className={`cursor-pointer border-b border-line/60 transition hover:bg-panel2 ${
-                        picked === row.code ? "bg-clay/5" : ""
-                      }`}
-                    >
-                      <td className="px-3 py-2 nums text-muted">{i + 1}</td>
-                      <td className="px-3 py-2 font-medium text-ink">{row.code_name ?? "—"}</td>
-                      <td className="px-3 py-2 nums text-xs text-muted">{row.code}</td>
-                      <td className="px-3 py-2 text-right nums">{fmtPrice(row.close)}</td>
-                      <td className={`px-3 py-2 text-right nums ${signClass(row.pctChg)}`}>{fmtPct(row.pctChg)}</td>
-                      <td className="px-3 py-2 text-right nums">{fmtAmount(row.amount)}</td>
-                      <td className="px-3 py-2 text-right nums">{fmtTurn(row.turn)}</td>
+            <>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-line text-left text-xs text-muted">
+                      <th className="px-3 py-2 font-medium">#</th>
+                      <th className="px-3 py-2 font-medium">名称</th>
+                      <th className="px-3 py-2 font-medium">代码</th>
+                      <th className="px-3 py-2 text-right font-medium">最新价</th>
+                      <th className="px-3 py-2 text-right font-medium">涨跌幅</th>
+                      <th className="px-3 py-2 text-right font-medium">成交额</th>
+                      <th className="px-3 py-2 text-right font-medium">换手率</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {shown.map((row, i) => (
+                      <tr
+                        key={row.code}
+                        onClick={() => setPicked(row.code)}
+                        className={`cursor-pointer border-b border-line/60 transition hover:bg-panel2 ${
+                          picked === row.code ? "bg-clay/5" : ""
+                        }`}
+                      >
+                        <td className="px-3 py-2 nums text-muted">{i + 1}</td>
+                        <td className="px-3 py-2">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onOpenStock(row.code);
+                            }}
+                            className="font-medium text-ink underline-offset-2 hover:text-clay hover:underline"
+                            title="查看个股"
+                          >
+                            {row.code_name ?? "—"}
+                          </button>
+                        </td>
+                        <td className="px-3 py-2 nums text-xs text-muted">{row.code}</td>
+                        <td className="px-3 py-2 text-right nums">{fmtPrice(row.close)}</td>
+                        <td className={`px-3 py-2 text-right nums ${signClass(row.pctChg)}`}>{fmtPct(row.pctChg)}</td>
+                        <td className="px-3 py-2 text-right nums">{fmtAmount(row.amount)}</td>
+                        <td className="px-3 py-2 text-right nums">{fmtTurn(row.turn)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <ExpandToggle
+                expanded={expanded}
+                hiddenCount={rows.length - INITIAL_ROWS}
+                onToggle={() => setExpanded((v) => !v)}
+              />
+            </>
           )}
         </div>
       </Card>
@@ -91,9 +119,14 @@ export function Rankings() {
           <CardHeader
             title={`K 线速览 · ${kline.data?.code_name ?? picked}`}
             right={
-              <button onClick={() => setPicked(null)} className="text-xs text-muted hover:text-clay">
-                收起
-              </button>
+              <div className="flex items-center gap-3">
+                <button onClick={() => onOpenStock(picked)} className="text-xs text-clay hover:underline">
+                  在个股查询打开
+                </button>
+                <button onClick={() => setPicked(null)} className="text-xs text-muted hover:text-clay">
+                  收起
+                </button>
+              </div>
             }
           />
           <div className="px-2 pb-2">

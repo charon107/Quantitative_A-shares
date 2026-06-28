@@ -3,11 +3,15 @@ import { useMaDuration } from "../api/client";
 import { Card, CardHeader } from "../components/Card";
 import { KpiCard } from "../components/KpiCard";
 import { ErrorState, Loading } from "../components/States";
+import { ExpandToggle } from "../components/ExpandToggle";
 import { DurationHistogram } from "../charts/DurationHistogram";
 
-export function MaDuration() {
+const INITIAL_ROWS = 10;
+
+export function MaDuration({ onOpenStock }: { onOpenStock: (code: string) => void }) {
   const q = useMaDuration();
   const [pick, setPick] = useState<number | null>(null);
+  const [expanded, setExpanded] = useState(false);
 
   const drill = useMemo(() => {
     const samples = q.data?.samples ?? [];
@@ -19,6 +23,12 @@ export function MaDuration() {
   if (q.error) return <ErrorState error={q.error} />;
 
   const s = q.data!.summary;
+  const shown = expanded ? drill : drill.slice(0, INITIAL_ROWS);
+
+  const selectDuration = (d: number) => {
+    setPick(d);
+    setExpanded(false);
+  };
 
   return (
     <div className="space-y-6">
@@ -33,7 +43,7 @@ export function MaDuration() {
       <Card>
         <CardHeader title="MA5 &gt; MA20 持续时长分布" subtitle="点击柱子查看该时长的个股明细" />
         <div className="px-2 pb-2">
-          <DurationHistogram samples={q.data!.samples} onPick={setPick} />
+          <DurationHistogram samples={q.data!.samples} onPick={selectDuration} />
         </div>
       </Card>
 
@@ -56,9 +66,17 @@ export function MaDuration() {
                   </tr>
                 </thead>
                 <tbody>
-                  {drill.map((r, i) => (
+                  {shown.map((r, i) => (
                     <tr key={`${r.code}-${i}`} className="border-b border-line/60">
-                      <td className="px-3 py-2 font-medium text-ink">{r.code_name ?? "—"}</td>
+                      <td className="px-3 py-2">
+                        <button
+                          onClick={() => onOpenStock(r.code)}
+                          className="font-medium text-ink underline-offset-2 hover:text-clay hover:underline"
+                          title="查看个股"
+                        >
+                          {r.code_name ?? "—"}
+                        </button>
+                      </td>
                       <td className="px-3 py-2 nums text-xs text-muted">{r.code}</td>
                       <td className="px-3 py-2 nums">{r.start_date}</td>
                       <td className="px-3 py-2 nums">{r.end_date}</td>
@@ -72,6 +90,11 @@ export function MaDuration() {
                 </tbody>
               </table>
             </div>
+            <ExpandToggle
+              expanded={expanded}
+              hiddenCount={drill.length - INITIAL_ROWS}
+              onToggle={() => setExpanded((v) => !v)}
+            />
           </div>
         </Card>
       )}
