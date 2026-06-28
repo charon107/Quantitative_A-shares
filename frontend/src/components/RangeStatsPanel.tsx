@@ -16,7 +16,7 @@ export function RangeStatsPanel({ stats, onClose }: { stats: RangeStats; onClose
   return (
     <div className="card card-pad">
       <div className="mb-2 flex items-center justify-between">
-        <h3 className="font-serif text-base font-semibold">区间统计</h3>
+        <h3 className="text-base font-semibold tracking-tight">区间统计</h3>
         <button onClick={onClose} className="text-xs text-muted hover:text-clay">清除</button>
       </div>
       <div className="mb-3 flex flex-wrap gap-x-6 gap-y-1 text-sm">

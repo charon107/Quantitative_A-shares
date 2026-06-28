@@ -11,7 +11,7 @@
     @apply bg-cream text-ink font-sans antialiased;
   }
   h1, h2, h3 {
-    @apply font-serif;
+    @apply font-sans tracking-tight;
   }
   /* 等宽数字，金融表格对齐 */
   .nums {
