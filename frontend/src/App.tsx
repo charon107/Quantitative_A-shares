@@ -16,14 +16,24 @@ const PAGES = [
 
 type PageKey = (typeof PAGES)[number]["key"];
 
+interface Focus {
+  start: string;
+  end: string;
+}
+
 export default function App() {
   const [page, setPage] = useState<PageKey>("overview");
   const [queryCode, setQueryCode] = useState<string | null>(null);
+  const [queryFocus, setQueryFocus] = useState<Focus | null>(null);
+  const [queryFrom, setQueryFrom] = useState<PageKey | null>(null);
   const status = useStatus();
 
-  // 从排行榜 / 多头时长点击公司名 -> 跳转个股查询并载入该股
-  const openStock = (code: string) => {
+  // 从排行榜 / 多头时长 / 当日明细点击公司名 -> 跳转个股查询并载入该股
+  // focus：可选的 K线聚焦区间；from：可选的来源页（用于返回键）
+  const openStock = (code: string, focus?: Focus | null, from?: PageKey) => {
     setQueryCode(code);
+    setQueryFocus(focus ?? null);
+    setQueryFrom(from ?? null);
     setPage("stock");
   };
 
@@ -61,9 +71,19 @@ export default function App() {
 
       <main className="mx-auto max-w-6xl px-5 py-7">
         {page === "overview" && <Overview onOpenStock={openStock} />}
-        {page === "stock" && <StockQuery key={queryCode ?? "none"} initialCode={queryCode} />}
+        {page === "stock" && (
+          <StockQuery
+            key={`${queryCode ?? "none"}-${queryFocus?.start ?? ""}`}
+            initialCode={queryCode}
+            focus={queryFocus}
+            onBack={queryFrom ? () => setPage(queryFrom) : undefined}
+            backLabel={queryFrom === "maDuration" ? "返回多头时长" : "返回"}
+          />
+        )}
         {page === "rankings" && <Rankings onOpenStock={openStock} />}
-        {page === "maDuration" && <MaDuration onOpenStock={openStock} />}
+        {page === "maDuration" && (
+          <MaDuration onOpenStock={(code, focus) => openStock(code, focus, "maDuration")} />
+        )}
         {page === "status" && <Status />}
       </main>
     </div>

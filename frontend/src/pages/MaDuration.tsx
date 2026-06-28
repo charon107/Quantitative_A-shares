@@ -8,7 +8,11 @@ import { DurationHistogram } from "../charts/DurationHistogram";
 
 const INITIAL_ROWS = 10;
 
-export function MaDuration({ onOpenStock }: { onOpenStock: (code: string) => void }) {
+export function MaDuration({
+  onOpenStock,
+}: {
+  onOpenStock: (code: string, focus?: { start: string; end: string }) => void;
+}) {
   const q = useMaDuration();
   const [pick, setPick] = useState<number | null>(null);
   const [expanded, setExpanded] = useState(false);
@@ -70,9 +74,9 @@ export function MaDuration({ onOpenStock }: { onOpenStock: (code: string) => voi
                     <tr key={`${r.code}-${i}`} className="border-b border-line/60">
                       <td className="px-3 py-2">
                         <button
-                          onClick={() => onOpenStock(r.code)}
+                          onClick={() => onOpenStock(r.code, { start: r.start_date, end: r.end_date })}
                           className="font-medium text-ink underline-offset-2 hover:text-clay hover:underline"
-                          title="查看个股"
+                          title="查看个股（聚焦该金叉区间）"
                         >
                           {r.code_name ?? "—"}
                         </button>

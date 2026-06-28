@@ -9,7 +9,22 @@ import { KlineChart } from "../charts/KlineChart";
 import { VolatilityChart } from "../charts/VolatilityChart";
 import { fmtAmount, fmtPct, fmtPrice, fmtTurn } from "../lib/format";
 
-export function StockQuery({ initialCode }: { initialCode?: string | null }) {
+interface Focus {
+  start: string;
+  end: string;
+}
+
+export function StockQuery({
+  initialCode,
+  focus,
+  onBack,
+  backLabel = "返回",
+}: {
+  initialCode?: string | null;
+  focus?: Focus | null;
+  onBack?: () => void;
+  backLabel?: string;
+}) {
   const [code, setCode] = useState<string | null>(initialCode ?? null);
   const kline = useKline(code);
   const vol = useVolatility(code);
@@ -19,6 +34,14 @@ export function StockQuery({ initialCode }: { initialCode?: string | null }) {
 
   return (
     <div className="space-y-6">
+      {onBack && (
+        <button
+          onClick={onBack}
+          className="inline-flex items-center gap-1 text-sm font-medium text-clay hover:underline"
+        >
+          <span aria-hidden>←</span> {backLabel}
+        </button>
+      )}
       <div className="flex flex-wrap items-center gap-3">
         <SearchBox onPick={setCode} />
         {kline.data && (
@@ -56,10 +79,13 @@ export function StockQuery({ initialCode }: { initialCode?: string | null }) {
 
       {code && (
         <Card>
-          <CardHeader title="K 线" subtitle="前复权 · MA5/10/20/60 · 成交量" />
+          <CardHeader
+            title="K 线"
+            subtitle={focus ? `前复权 · 已聚焦 ${focus.start} ~ ${focus.end} 金叉区间` : "前复权 · MA5/10/20/60 · 成交量"}
+          />
           <div className="px-2 pb-2">
             {kline.isLoading ? <Loading /> : kline.error ? <div className="p-4"><ErrorState error={kline.error} /></div> : (
-              <KlineChart points={pts} />
+              <KlineChart points={pts} focus={focus} />
             )}
           </div>
         </Card>

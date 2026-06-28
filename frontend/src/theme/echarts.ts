@@ -16,7 +16,7 @@ export const C = {
   blue: "#5B7C99",
 };
 
-export const MA_COLORS = ["#6B6760", "#D9A441", "#5B7C99", "#9A6FB0"]; // MA5/10/20/60
+export const MA_COLORS = ["#2F77B6", "#E0A92E", "#E2752E", "#8B5C9E"]; // MA5蓝 / MA10黄 / MA20橙 / MA60紫
 
 const FONT = "Inter, 'Noto Sans SC', sans-serif";
 
