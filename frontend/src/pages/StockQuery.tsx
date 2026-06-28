@@ -26,6 +26,14 @@ export function StockQuery({ initialCode }: { initialCode?: string | null }) {
             <span className="nums text-sm text-muted">{kline.data.code}</span>
           </div>
         )}
+        <a
+          href="/api/export/kline.parquet"
+          download
+          className="ml-auto inline-flex items-center gap-1.5 rounded-xl border border-line bg-panel px-3.5 py-2 text-sm font-medium text-clay shadow-soft transition hover:border-clay/40 hover:bg-clay/5"
+          title="导出数据库全部 K线为 Parquet 文件"
+        >
+          <span aria-hidden>↓</span> 下载全部数据
+        </a>
       </div>
 
       {!code && (

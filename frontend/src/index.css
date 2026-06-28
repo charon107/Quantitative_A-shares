@@ -29,11 +29,10 @@
   }
 }
 
-/* 自定义滚动条（暖灰） */
-::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-thumb { background: #DCD6C9; border-radius: 6px; }
-::-webkit-scrollbar-thumb:hover { background: #CFC8B8; }
-::-webkit-scrollbar-track { background: transparent; }
+/* 隐藏滚动条（保留滚轮/键盘/触控滚动） */
+html { scrollbar-width: none; }            /* Firefox */
+* { -ms-overflow-style: none; }            /* 旧 Edge/IE */
+::-webkit-scrollbar { width: 0; height: 0; display: none; }  /* WebKit */
 
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
