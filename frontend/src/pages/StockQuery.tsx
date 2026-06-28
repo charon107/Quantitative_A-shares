@@ -6,6 +6,7 @@ import { KpiCard } from "../components/KpiCard";
 import { ErrorState, Loading } from "../components/States";
 import { CompanyInfoPanel } from "../components/CompanyInfoPanel";
 import { RangeStatsPanel } from "../components/RangeStatsPanel";
+import { FullscreenOverlay } from "../components/FullscreenOverlay";
 import { KlineChart } from "../charts/KlineChart";
 import { VolatilityChart } from "../charts/VolatilityChart";
 import type { RangeStats } from "../lib/rangeStats";
@@ -30,6 +31,7 @@ export function StockQuery({
   const [code, setCode] = useState<string | null>(initialCode ?? null);
   const [rangeMode, setRangeMode] = useState(false);
   const [rangeStats, setRangeStats] = useState<RangeStats | null>(null);
+  const [fullscreen, setFullscreen] = useState(false);
   const kline = useKline(code);
   const vol = useVolatility(code);
 
@@ -101,16 +103,25 @@ export function StockQuery({
                 : "前复权 · MA5/10/20/60 · 成交量"
             }
             right={
-              <button
-                onClick={toggleRangeMode}
-                className={`rounded-lg border px-3 py-1 text-xs font-medium transition ${
-                  rangeMode
-                    ? "border-clay bg-clay/10 text-clay"
-                    : "border-line bg-panel2 text-muted hover:text-ink"
-                }`}
-              >
-                {rangeMode ? "退出框选" : "区间统计"}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setFullscreen(true)}
+                  className="rounded-lg border border-line bg-panel2 px-3 py-1 text-xs font-medium text-muted transition hover:text-ink"
+                  title="全屏查看（移动端可旋转横屏）"
+                >
+                  ⛶ 全屏
+                </button>
+                <button
+                  onClick={toggleRangeMode}
+                  className={`rounded-lg border px-3 py-1 text-xs font-medium transition ${
+                    rangeMode
+                      ? "border-clay bg-clay/10 text-clay"
+                      : "border-line bg-panel2 text-muted hover:text-ink"
+                  }`}
+                >
+                  {rangeMode ? "退出框选" : "区间统计"}
+                </button>
+              </div>
             }
           />
           <div className="px-2 pb-2">
@@ -123,6 +134,12 @@ export function StockQuery({
 
       {code && rangeStats && (
         <RangeStatsPanel stats={rangeStats} onClose={() => setRangeStats(null)} />
+      )}
+
+      {code && fullscreen && (
+        <FullscreenOverlay onClose={() => setFullscreen(false)}>
+          <KlineChart points={pts} focus={focus} rangeMode={rangeMode} onRange={handleRange} height={window.innerHeight - 80} />
+        </FullscreenOverlay>
       )}
 
       {code && (
