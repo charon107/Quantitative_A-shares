@@ -26,6 +26,7 @@ export default function App() {
   const [queryCode, setQueryCode] = useState<string | null>(null);
   const [queryFocus, setQueryFocus] = useState<Focus | null>(null);
   const [queryFrom, setQueryFrom] = useState<PageKey | null>(null);
+  const [maDurationPick, setMaDurationPick] = useState<number | null>(null);
   const status = useStatus();
 
   // 从排行榜 / 多头时长 / 当日明细点击公司名 -> 跳转个股查询并载入该股
@@ -35,6 +36,12 @@ export default function App() {
     setQueryFocus(focus ?? null);
     setQueryFrom(from ?? null);
     setPage("stock");
+  };
+
+  // 多头时长 → 个股查询：携带 pick（持续天数），返回时可还原排行表
+  const openStockFromMaDuration = (code: string, focus: { start: string; end: string }, pick: number) => {
+    setMaDurationPick(pick);
+    openStock(code, focus, "maDuration");
   };
 
   return (
@@ -82,7 +89,11 @@ export default function App() {
         )}
         {page === "rankings" && <Rankings onOpenStock={openStock} />}
         {page === "maDuration" && (
-          <MaDuration onOpenStock={(code, focus) => openStock(code, focus, "maDuration")} />
+          <MaDuration
+            initialPick={maDurationPick}
+            onClearPick={() => setMaDurationPick(null)}
+            onOpenStock={openStockFromMaDuration}
+          />
         )}
         {page === "status" && <Status />}
       </main>

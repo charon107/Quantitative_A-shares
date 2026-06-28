@@ -9,18 +9,29 @@ import { DurationHistogram } from "../charts/DurationHistogram";
 const INITIAL_ROWS = 10;
 
 export function MaDuration({
+  initialPick,
+  onClearPick,
   onOpenStock,
 }: {
-  onOpenStock: (code: string, focus?: { start: string; end: string }) => void;
+  initialPick?: number | null;
+  onClearPick?: () => void;
+  onOpenStock: (code: string, focus: { start: string; end: string }, pick: number) => void;
 }) {
   const q = useMaDuration();
-  const [pick, setPick] = useState<number | null>(null);
+  const [pick, setPick] = useState<number | null>(initialPick ?? null);
   const [expanded, setExpanded] = useState(false);
 
   const drill = useMemo(() => {
     const samples = q.data?.samples ?? [];
     if (pick == null) return [];
-    return samples.filter((s) => s.duration === pick);
+    return samples
+      .filter((s) => s.duration === pick)
+      .sort((a, b) => {
+        // 未结束的排前面
+        if (a.ongoing !== b.ongoing) return a.ongoing ? -1 : 1;
+        // 同组内按起始日降序
+        return b.start_date.localeCompare(a.start_date);
+      });
   }, [q.data, pick]);
 
   if (q.isLoading) return <Loading label="计算多头时长分布…" />;
@@ -55,7 +66,7 @@ export function MaDuration({
         <Card>
           <CardHeader
             title={`持续 ${pick} 日的个股（${drill.length}）`}
-            right={<button onClick={() => setPick(null)} className="text-xs text-muted hover:text-clay">收起</button>}
+            right={<button onClick={() => { setPick(null); onClearPick?.(); }} className="text-xs text-muted hover:text-clay">收起</button>}
           />
           <div className="px-2 pb-4">
             <div className="overflow-x-auto">
@@ -74,7 +85,7 @@ export function MaDuration({
                     <tr key={`${r.code}-${i}`} className="border-b border-line/60">
                       <td className="px-3 py-2">
                         <button
-                          onClick={() => onOpenStock(r.code, { start: r.start_date, end: r.end_date })}
+                          onClick={() => onOpenStock(r.code, { start: r.start_date, end: r.end_date }, pick!)}
                           className="font-medium text-ink underline-offset-2 hover:text-clay hover:underline"
                           title="查看个股（聚焦该金叉区间）"
                         >
