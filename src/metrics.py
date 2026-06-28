@@ -128,6 +128,14 @@ def breadth_series(
     return df
 
 
+def company_info_df(code: str, path: str | None = None) -> pd.DataFrame:
+    """单只股票的公司信息（stock_info 一行）。表不存在/无数据返回空 DataFrame。"""
+    try:
+        return db.query_df("SELECT * FROM stock_info WHERE code = ?", [code], path=path)
+    except Exception:
+        return pd.DataFrame()
+
+
 def day_movers(date: str, path: str | None = None) -> pd.DataFrame:
     """某交易日全部上涨/下跌个股（含名称、开盘价、收盘价、涨跌幅），按涨跌幅降序。
 

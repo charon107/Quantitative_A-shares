@@ -82,7 +82,7 @@ export function DayMoversPanel({
     <Card>
       <CardHeader
         title={`${date} 个股明细`}
-        subtitle="左：上涨 · 右：下跌 · 点击名称查看个股"
+        subtitle="点击名称查看个股"
         right={<button onClick={onClose} className="text-xs text-muted hover:text-clay">收起</button>}
       />
       <div className="px-5 pb-5">

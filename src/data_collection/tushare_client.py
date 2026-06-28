@@ -161,6 +161,63 @@ def fetch_stock_basic() -> pd.DataFrame:
     return df[["code", "code_name"]]
 
 
+def _safe_from_ts_code(ts_code) -> str | None:
+    try:
+        return _from_ts_code(ts_code)
+    except Exception:
+        return None
+
+
+def _fmt_date8(x):
+    """'20260626' -> '2026-06-26'；其他返回 None。"""
+    return f"{x[:4]}-{x[4:6]}-{x[6:8]}" if isinstance(x, str) and len(x) == 8 and x.isdigit() else None
+
+
+def fetch_company_info() -> pd.DataFrame:
+    """全市场公司信息：stock_basic（扩展字段）+ stock_company 合并，按 code 关联。
+
+    返回列：code/code_name/fullname/area/industry/market/list_date +
+            chairman/manager/secretary/reg_capital/setup_date/province/city/
+            employees/website/email/office/main_business/introduction/business_scope。
+    """
+    basic = _call_with_retry(
+        "stock_basic_ext",
+        _pro().stock_basic,
+        exchange="", list_status="L",
+        fields="ts_code,name,fullname,area,industry,market,list_date",
+    )
+    if basic is None or basic.empty:
+        raise RuntimeError("stock_basic 返回空。")
+    basic = basic.copy()
+    basic["code"] = basic["ts_code"].apply(_safe_from_ts_code)
+    basic = basic.dropna(subset=["code"]).rename(columns={"name": "code_name"})
+    basic["list_date"] = basic["list_date"].apply(_fmt_date8)
+
+    comp_fields = ("ts_code,chairman,manager,secretary,reg_capital,setup_date,"
+                   "province,city,introduction,website,email,office,employees,"
+                   "main_business,business_scope")
+    comps = []
+    for exch in ("SSE", "SZSE", "BSE"):
+        try:
+            c = _call_with_retry(f"stock_company_{exch}", _pro().stock_company,
+                                 exchange=exch, fields=comp_fields)
+            if c is not None and not c.empty:
+                comps.append(c)
+        except Exception as e:
+            print(f"[fetch_company_info] {exch} 失败，跳过：{e}")
+    comp = pd.concat(comps, ignore_index=True) if comps else pd.DataFrame(columns=["ts_code"])
+    if not comp.empty:
+        comp = comp.copy()
+        comp["code"] = comp["ts_code"].apply(_safe_from_ts_code)
+        comp = comp.dropna(subset=["code"]).drop(columns=["ts_code"])
+        comp["setup_date"] = comp["setup_date"].apply(_fmt_date8)
+        comp["reg_capital"] = pd.to_numeric(comp["reg_capital"], errors="coerce")
+        comp["employees"] = pd.to_numeric(comp["employees"], errors="coerce").astype("Int64")
+
+    df = basic.merge(comp, on="code", how="left") if not comp.empty else basic
+    return df
+
+
 def fetch_daily_raw(code: str, start_date: str, end_date: str = "") -> pd.DataFrame:
     """拉取未复权日线原始价：date/open/high/low/close/volume/amount/pctChg。"""
     ts_code = _to_ts_code(code)

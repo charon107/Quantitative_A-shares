@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import type {
   Breadth,
   BreadthPoint,
+  CompanyInfo,
   DayMovers,
   IndexPoint,
   LimitPoint,
@@ -67,6 +68,15 @@ export const useKline = (code: string | null) =>
     queryKey: ["kline", code],
     queryFn: () => get<StockKline>(`/stocks/${code}/kline`),
     enabled: !!code,
+  });
+
+export const useCompanyInfo = (code: string | null) =>
+  useQuery({
+    queryKey: ["companyInfo", code],
+    queryFn: () => get<CompanyInfo>(`/stocks/${code}/info`),
+    enabled: !!code,
+    retry: false,
+    staleTime: 24 * 3600_000,
   });
 
 export const useVolatility = (code: string | null, window = 20) =>

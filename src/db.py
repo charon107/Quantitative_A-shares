@@ -35,6 +35,13 @@ RAW_COLUMNS = [
     "code", "date", "open", "high", "low", "close",
     "volume", "amount", "pctChg", "turn",
 ]
+# 公司信息
+COMPANY_COLUMNS = [
+    "code", "code_name", "fullname", "area", "industry", "market", "list_date",
+    "chairman", "manager", "secretary", "reg_capital", "setup_date",
+    "province", "city", "employees", "website", "email", "office",
+    "main_business", "introduction", "business_scope",
+]
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS kline (
@@ -73,6 +80,31 @@ CREATE TABLE IF NOT EXISTS adj_factor (
     trade_date DATE    NOT NULL,
     adj_factor DOUBLE,
     PRIMARY KEY (code, trade_date)
+);
+
+-- 公司信息（来自 tushare stock_basic + stock_company）
+CREATE TABLE IF NOT EXISTS stock_info (
+    code           VARCHAR PRIMARY KEY,
+    code_name      VARCHAR,
+    fullname       VARCHAR,
+    area           VARCHAR,
+    industry       VARCHAR,
+    market         VARCHAR,
+    list_date      VARCHAR,
+    chairman       VARCHAR,
+    manager        VARCHAR,
+    secretary      VARCHAR,
+    reg_capital    DOUBLE,
+    setup_date     VARCHAR,
+    province       VARCHAR,
+    city           VARCHAR,
+    employees      BIGINT,
+    website        VARCHAR,
+    email          VARCHAR,
+    office         VARCHAR,
+    main_business  VARCHAR,
+    introduction   VARCHAR,
+    business_scope VARCHAR
 );
 """
 
@@ -212,6 +244,24 @@ def read_adj(code: str, conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
         "SELECT code, trade_date, adj_factor FROM adj_factor WHERE code = ? ORDER BY trade_date",
         [code],
     ).df()
+
+
+def upsert_company(df: pd.DataFrame, conn: duckdb.DuckDBPyConnection) -> int:
+    """按 code UPSERT 公司信息。缺失列补 NULL。"""
+    if df is None or df.empty or "code" not in df.columns:
+        return 0
+    frame = df.copy()
+    for col in COMPANY_COLUMNS:
+        if col not in frame.columns:
+            frame[col] = pd.NA
+    frame = frame[COMPANY_COLUMNS].dropna(subset=["code"]).drop_duplicates("code")
+    conn.register("_company_in", frame)
+    conn.execute(
+        f"INSERT OR REPLACE INTO stock_info ({', '.join(COMPANY_COLUMNS)}) "
+        f"SELECT {', '.join(COMPANY_COLUMNS)} FROM _company_in"
+    )
+    conn.unregister("_company_in")
+    return len(frame)
 
 
 def atomic_swap(tmp_path: str, dest_path: str | None = None) -> None:

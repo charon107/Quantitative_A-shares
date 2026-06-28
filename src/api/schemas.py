@@ -86,6 +86,30 @@ class SearchRow(BaseModel):
     code_name: str | None
 
 
+class CompanyInfo(BaseModel):
+    code: str
+    code_name: str | None = None
+    fullname: str | None = None
+    area: str | None = None
+    industry: str | None = None
+    market: str | None = None
+    list_date: str | None = None
+    chairman: str | None = None
+    manager: str | None = None
+    secretary: str | None = None
+    reg_capital: float | None = None
+    setup_date: str | None = None
+    province: str | None = None
+    city: str | None = None
+    employees: int | None = None
+    website: str | None = None
+    email: str | None = None
+    office: str | None = None
+    main_business: str | None = None
+    introduction: str | None = None
+    business_scope: str | None = None
+
+
 class DurationSample(BaseModel):
     code: str
     code_name: str | None = None

@@ -4,6 +4,7 @@ import { SearchBox } from "../components/SearchBox";
 import { Card, CardHeader } from "../components/Card";
 import { KpiCard } from "../components/KpiCard";
 import { ErrorState, Loading } from "../components/States";
+import { CompanyInfoPanel } from "../components/CompanyInfoPanel";
 import { KlineChart } from "../charts/KlineChart";
 import { VolatilityChart } from "../charts/VolatilityChart";
 import { fmtAmount, fmtPct, fmtPrice, fmtTurn } from "../lib/format";
@@ -50,6 +51,8 @@ export function StockQuery({ initialCode }: { initialCode?: string | null }) {
           <KpiCard label="换手率" value={fmtTurn(last.turn)} tone="clay" />
         </div>
       )}
+
+      {code && <CompanyInfoPanel code={code} />}
 
       {code && (
         <Card>

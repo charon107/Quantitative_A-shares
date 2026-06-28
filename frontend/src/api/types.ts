@@ -82,6 +82,30 @@ export interface SearchRow {
   code_name: string | null;
 }
 
+export interface CompanyInfo {
+  code: string;
+  code_name: string | null;
+  fullname: string | null;
+  area: string | null;
+  industry: string | null;
+  market: string | null;
+  list_date: string | null;
+  chairman: string | null;
+  manager: string | null;
+  secretary: string | null;
+  reg_capital: number | null;
+  setup_date: string | null;
+  province: string | null;
+  city: string | null;
+  employees: number | null;
+  website: string | null;
+  email: string | null;
+  office: string | null;
+  main_business: string | null;
+  introduction: string | null;
+  business_scope: string | null;
+}
+
 export interface DurationSample {
   code: string;
   code_name: string | null;

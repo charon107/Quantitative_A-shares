@@ -33,3 +33,12 @@ def volatility(code: str, window: int = Query(20, ge=2, le=250)):
     except LookupError:
         raise HTTPException(status_code=404, detail=f"无数据：{code}")
     return df_to_records(frame)
+
+
+@router.get("/{code}/info", response_model=schemas.CompanyInfo)
+def company_info(code: str):
+    df = metrics.company_info_df(code)
+    if df.empty:
+        raise HTTPException(status_code=404, detail=f"无公司信息：{code}")
+    rec = df_to_records(df, date_cols=())[0]
+    return schemas.CompanyInfo(**rec)
