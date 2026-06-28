@@ -98,6 +98,36 @@ def limit_up_down_series(
 
 
 # ========== 个股 K线 ==========
+def breadth_series(
+    up_threshold: float = 9.9,
+    down_threshold: float = -9.9,
+    path: str | None = None,
+) -> pd.DataFrame:
+    """每日市场涨跌家数走势（一条 SQL 同时给出 上涨/下跌/涨停/跌停）。
+
+    列：date / up / down / limit_up / limit_down。
+    """
+    df = db.query_df(
+        """
+        SELECT date,
+               SUM(CASE WHEN pctChg > 0 THEN 1 ELSE 0 END) AS up,
+               SUM(CASE WHEN pctChg < 0 THEN 1 ELSE 0 END) AS down,
+               SUM(CASE WHEN pctChg >= ? THEN 1 ELSE 0 END) AS limit_up,
+               SUM(CASE WHEN pctChg <= ? THEN 1 ELSE 0 END) AS limit_down
+        FROM kline
+        GROUP BY date
+        ORDER BY date
+        """,
+        [up_threshold, down_threshold],
+        path=path,
+    )
+    if df.empty:
+        return df
+    for c in ("up", "down", "limit_up", "limit_down"):
+        df[c] = df[c].astype(int)
+    return df
+
+
 def load_stock_kline(code: str, path: str | None = None) -> pd.DataFrame:
     """单只股票完整 K线（按日期升序）。无数据抛 LookupError。"""
     df = db.query_df(

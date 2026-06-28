@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import type {
   Breadth,
+  BreadthPoint,
   IndexPoint,
   LimitPoint,
   MaDuration,
@@ -34,6 +35,9 @@ export const useEqualWeightIndex = (start: string) =>
 
 export const useLimitUpDown = () =>
   useQuery({ queryKey: ["lud"], queryFn: () => get<LimitPoint[]>("/market/limit-up-down") });
+
+export const useBreadthSeries = () =>
+  useQuery({ queryKey: ["breadthSeries"], queryFn: () => get<BreadthPoint[]>("/market/breadth-series") });
 
 export const useRankings = (metric: RankMetric, n = 50, ascending = false) =>
   useQuery({

@@ -32,6 +32,11 @@ def limit_up_down() -> pd.DataFrame:
     return res if res is not None else pd.DataFrame()
 
 
+def breadth_series() -> pd.DataFrame:
+    res, _ = cache.try_load("load_breadth_series", fallback_fn=metrics.breadth_series, ttl=86400)
+    return res if res is not None else pd.DataFrame()
+
+
 def ma_duration() -> pd.DataFrame:
     res, _ = cache.try_load("load_ma_duration_samples", fallback_fn=metrics.ma_duration_samples, ttl=86400 * 7)
     return res if res is not None else pd.DataFrame()

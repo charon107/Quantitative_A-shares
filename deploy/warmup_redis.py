@@ -26,11 +26,11 @@ s = metrics.equal_weighted_index("2025-01-01")
 cache.save("load_equal_weighted_index", s, relevant_params={"start_date": "2025-01-01"}, ttl=86400)
 print(f"[2/5] equal_weighted_index(2025-01-01): {len(s)} rows, {time.time()-t0:.1f}s")
 
-# 3. load_limit_up_down
+# 3. load_breadth_series（每日涨跌家数，含涨停/跌停）
 t0 = time.time()
-lud = metrics.limit_up_down_series()
-cache.save("load_limit_up_down", lud, ttl=86400)
-print(f"[3/5] limit_up_down: {len(lud)} rows, {time.time()-t0:.1f}s")
+bs = metrics.breadth_series()
+cache.save("load_breadth_series", bs, ttl=86400)
+print(f"[3/5] breadth_series: {len(bs)} rows, {time.time()-t0:.1f}s")
 
 # 4. load_ma_duration_samples（最耗时，TTL 7 天）
 t0 = time.time()

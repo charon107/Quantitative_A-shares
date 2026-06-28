@@ -23,6 +23,14 @@ class LimitPoint(BaseModel):
     limit_down: int
 
 
+class BreadthPoint(BaseModel):
+    date: str
+    up: int
+    down: int
+    limit_up: int
+    limit_down: int
+
+
 class KlinePoint(BaseModel):
     date: str
     open: float | None

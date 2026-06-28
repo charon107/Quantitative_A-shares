@@ -1,32 +1,36 @@
 import { useMemo, useState } from "react";
-import { useBreadth, useEqualWeightIndex, useLimitUpDown } from "../api/client";
+import { useBreadth, useBreadthSeries, useEqualWeightIndex } from "../api/client";
 import { Card, CardHeader } from "../components/Card";
 import { KpiCard } from "../components/KpiCard";
 import { RangeTabs, rangeDays, type RangeKey } from "../components/RangeTabs";
 import { ErrorState, Loading } from "../components/States";
 import { IndexLineChart } from "../charts/IndexLineChart";
-import { LimitUpDownChart } from "../charts/LimitUpDownChart";
+import { AdvanceDeclineChart } from "../charts/AdvanceDeclineChart";
 import { fmtInt } from "../lib/format";
 
 const START = "2025-01-01";
 
+function sliceByRange<T extends { date: string }>(pts: T[], range: RangeKey): T[] {
+  const d = rangeDays(range);
+  if (!d || pts.length === 0) return pts;
+  const cutoff = new Date(pts[pts.length - 1].date);
+  cutoff.setDate(cutoff.getDate() - d);
+  return pts.filter((p) => new Date(p.date) >= cutoff);
+}
+
 export function Overview() {
   const breadth = useBreadth();
   const ewi = useEqualWeightIndex(START);
-  const lud = useLimitUpDown();
-  const [range, setRange] = useState<RangeKey>("3M");
+  const series = useBreadthSeries();
+  const [indexRange, setIndexRange] = useState<RangeKey>("3M");
+  const [adRange, setAdRange] = useState<RangeKey>("3M");
 
-  const indexPoints = useMemo(() => {
-    const pts = ewi.data ?? [];
-    const d = rangeDays(range);
-    if (!d || pts.length === 0) return pts;
-    const cutoff = new Date(pts[pts.length - 1].date);
-    cutoff.setDate(cutoff.getDate() - d);
-    return pts.filter((p) => new Date(p.date) >= cutoff);
-  }, [ewi.data, range]);
+  const indexPoints = useMemo(() => sliceByRange(ewi.data ?? [], indexRange), [ewi.data, indexRange]);
+  const adPoints = useMemo(() => sliceByRange(series.data ?? [], adRange), [series.data, adRange]);
 
   const b = breadth.data;
   const ratio = b?.ratio == null ? "—" : b.ratio.toFixed(2);
+  const latest = series.data && series.data.length ? series.data[series.data.length - 1] : null;
 
   return (
     <div className="space-y-6">
@@ -53,7 +57,7 @@ export function Overview() {
         <CardHeader
           title="等权指数走势"
           subtitle="全市场等权组合累计收益"
-          right={<RangeTabs value={range} onChange={setRange} />}
+          right={<RangeTabs value={indexRange} onChange={setIndexRange} />}
         />
         <div className="px-2 pb-2">
           {ewi.isLoading ? <Loading /> : ewi.error ? <div className="p-4"><ErrorState error={ewi.error} /></div> : (
@@ -63,10 +67,18 @@ export function Overview() {
       </Card>
 
       <Card>
-        <CardHeader title="涨停 / 跌停家数" subtitle="每日封板镜像分布" />
+        <CardHeader
+          title="每日涨跌家数"
+          subtitle={
+            latest
+              ? `最新 ${latest.date}：上涨 ${fmtInt(latest.up)} · 下跌 ${fmtInt(latest.down)} · 涨停 ${latest.limit_up} · 跌停 ${latest.limit_down}`
+              : "全市场每日上涨 / 下跌公司数量"
+          }
+          right={<RangeTabs value={adRange} onChange={setAdRange} />}
+        />
         <div className="px-2 pb-2">
-          {lud.isLoading ? <Loading /> : lud.error ? <div className="p-4"><ErrorState error={lud.error} /></div> : (
-            <LimitUpDownChart points={lud.data ?? []} />
+          {series.isLoading ? <Loading /> : series.error ? <div className="p-4"><ErrorState error={series.error} /></div> : (
+            <AdvanceDeclineChart points={adPoints} />
           )}
         </div>
       </Card>

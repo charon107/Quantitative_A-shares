@@ -19,6 +19,14 @@ export interface LimitPoint {
   limit_down: number;
 }
 
+export interface BreadthPoint {
+  date: string;
+  up: number;
+  down: number;
+  limit_up: number;
+  limit_down: number;
+}
+
 export interface KlinePoint {
   date: string;
   open: number | null;
