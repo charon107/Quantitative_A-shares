@@ -14,8 +14,8 @@ export default {
         line: "#E5E1D8", // 暖灰边框
         clay: "#CC785C", // 强调（book cloth 陶土）
         clayDark: "#BD5D3A", // 强调 hover
-        up: "#3A8C5F", // 上涨（沉稳绿）
-        down: "#C84B31", // 下跌（陶红）
+        up: "#C84B31", // 上涨（陶红）— A股惯例「红涨绿跌」
+        down: "#3A8C5F", // 下跌（沉稳绿）
         amber: "#D9A441", // 警示 / 未结束样本
       },
       fontFamily: {

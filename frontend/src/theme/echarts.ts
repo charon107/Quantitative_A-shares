@@ -10,8 +10,8 @@ export const C = {
   grid: "#ECE8DF",
   clay: "#CC785C",
   clayDark: "#BD5D3A",
-  up: "#3A8C5F",
-  down: "#C84B31",
+  up: "#C84B31", // 上涨红（A股「红涨绿跌」）
+  down: "#3A8C5F", // 下跌绿
   amber: "#D9A441",
   blue: "#5B7C99",
 };
