@@ -1,24 +1,17 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useBreadth, useBreadthSeries, useEqualWeightIndex, useShanghaiEqualWeightIndex, useLimitUpDown } from "../api/client";
 import { Card, CardHeader } from "../components/Card";
 import { KpiCard } from "../components/KpiCard";
-import { RangeTabs, rangeDays, type RangeKey } from "../components/RangeTabs";
+import { RangeTabs, type RangeKey } from "../components/RangeTabs";
 import { ErrorState, Loading } from "../components/States";
 import { IndexLineChart } from "../charts/IndexLineChart";
 import { AdvanceDeclineChart } from "../charts/AdvanceDeclineChart";
 import { LimitUpDownChart } from "../charts/LimitUpDownChart";
 import { DayMoversPanel } from "../components/DayMoversPanel";
 import { fmtInt } from "../lib/format";
+import { useSliceByRange } from "../lib/useSliceByRange";
 
 const START = "2025-01-01";
-
-function sliceByRange<T extends { date: string }>(pts: T[], range: RangeKey): T[] {
-  const d = rangeDays(range);
-  if (!d || pts.length === 0) return pts;
-  const cutoff = new Date(pts[pts.length - 1].date);
-  cutoff.setDate(cutoff.getDate() - d);
-  return pts.filter((p) => new Date(p.date) >= cutoff);
-}
 
 export function Overview({ onOpenStock }: { onOpenStock: (code: string) => void }) {
   const breadth = useBreadth();
@@ -31,10 +24,10 @@ export function Overview({ onOpenStock }: { onOpenStock: (code: string) => void 
   const [ludRange, setLudRange] = useState<RangeKey>("3M");
   const [pickedDate, setPickedDate] = useState<string | null>(null);
 
-  const ewiPoints = useMemo(() => sliceByRange(ewi.data ?? [], indexRange), [ewi.data, indexRange]);
-  const shewiPoints = useMemo(() => sliceByRange(shewi.data ?? [], indexRange), [shewi.data, indexRange]);
-  const adPoints = useMemo(() => sliceByRange(series.data ?? [], adRange), [series.data, adRange]);
-  const ludPoints = useMemo(() => sliceByRange(lud.data ?? [], ludRange), [lud.data, ludRange]);
+  const ewiPoints = useSliceByRange(ewi.data, indexRange);
+  const shewiPoints = useSliceByRange(shewi.data, indexRange);
+  const adPoints = useSliceByRange(series.data, adRange);
+  const ludPoints = useSliceByRange(lud.data, ludRange);
 
   const b = breadth.data;
   const ratio = b?.ratio == null ? "—" : b.ratio.toFixed(2);

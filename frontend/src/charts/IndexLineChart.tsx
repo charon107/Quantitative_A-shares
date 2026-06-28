@@ -10,30 +10,19 @@ export interface SeriesConfig {
 
 export function IndexLineChart({
   series,
-  points,
   height = 340,
 }: {
-  series?: SeriesConfig[];
-  /** @deprecated single-series shorthand */
-  points?: IndexPoint[];
+  series: SeriesConfig[];
   height?: number;
 }) {
-  // Back-compat: single `points` prop → one series
-  const resolved: SeriesConfig[] = series
-    ? series
-    : points
-      ? [{ name: "全市场等权", points, color: C.clay }]
-      : [];
+  if (!series.length) return null;
 
-  if (!resolved.length) return null;
-
-  // Shared date axis from the longest series
-  const longest = resolved.reduce((a, b) =>
+  const longest = series.reduce((a, b) =>
     a.points.length >= b.points.length ? a : b,
   );
   const dates = longest.points.map((p) => p.date);
 
-  const seriesDefs = resolved.map((s) => {
+  const seriesDefs = series.map((s) => {
     const valMap = new Map(s.points.map((p) => [p.date, +(p.value! * 100).toFixed(2)]));
     const data = dates.map((d) => valMap.get(d) ?? null);
 
