@@ -20,12 +20,17 @@ jobs:
     steps:
       - name: SSH 触发服务器入库（tushare -> DuckDB -> 清/预热 Redis）
         uses: appleboy/ssh-action@v1.2.0
+        env:
+          TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
+          TUSHARE_API_URL: ${{ secrets.TUSHARE_API_URL }}
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           password: ${{ secrets.SERVER_PASSWORD }}
           port: ${{ secrets.SERVER_PORT || 22 }}
           command_timeout: 25m
+          # 把已验证的代理网关凭证转发到服务器（环境变量优先于 tushare.env）
+          envs: TUSHARE_TOKEN,TUSHARE_API_URL
           script: |
             set -e
             cd /root/Quantitative_A-shares/WechatNum

@@ -8,8 +8,8 @@ set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
 cd "$HERE/.."  # 进入项目根目录
 
-# 加载 token 等凭证（供 SSH 非登录 shell / CI 触发时使用）
-if [ -f "$HERE/tushare.env" ]; then
+# 加载 token 等凭证：环境变量（CI 转发）优先；未提供时回退到 tushare.env 文件
+if [ -z "${TUSHARE_TOKEN:-}" ] && [ -f "$HERE/tushare.env" ]; then
     set -a
     . "$HERE/tushare.env"
     set +a
