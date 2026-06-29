@@ -28,8 +28,8 @@ uv run python -m src.data_collection.stock_price
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] 更新公司信息（stock_info）..."
 uv run python scripts/ingest_company_info.py || echo "[warn] 公司信息更新失败，跳过"
 
-echo "[$(date '+%Y-%m-%d %H:%M:%S')] 更新同花顺人气榜（ths_hot）..."
-uv run python scripts/ingest_ths_hot.py || echo "[warn] 人气榜更新失败，跳过"
+# 注：同花顺人气榜(ths_hot)改由 GitHub Actions runner 直连网关抓取后回传加载
+# （服务器->网关对 ths_hot 偶发读超时），见 .github/workflows/daily_ingest.yml。
 
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] 入库完成，清空 Redis 缓存..."
 uv run python -m src.cache clear || true
