@@ -7,6 +7,7 @@ import { ErrorState, Loading } from "../components/States";
 import { CompanyInfoPanel } from "../components/CompanyInfoPanel";
 import { RangeStatsPanel } from "../components/RangeStatsPanel";
 import { FullscreenOverlay } from "../components/FullscreenOverlay";
+import { StockHighlights } from "../components/StockHighlights";
 import { KlineChart } from "../charts/KlineChart";
 import { VolatilityChart } from "../charts/VolatilityChart";
 import type { RangeStats } from "../lib/rangeStats";
@@ -74,11 +75,7 @@ export function StockQuery({
         </a>
       </div>
 
-      {!code && (
-        <Card>
-          <div className="py-16 text-center text-muted">输入代码或名称，查看个股 K 线与指标。</div>
-        </Card>
-      )}
+      {!code && <StockHighlights onPick={setCode} />}
 
       {code && last && (
         <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
