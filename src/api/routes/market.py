@@ -46,6 +46,12 @@ def breadth_series():
     return df_to_records(services.breadth_series())
 
 
+@router.get("/hot-stocks", response_model=list[schemas.HotStock])
+def hot_stocks():
+    """同花顺个股人气榜（沪深主板，最新交易日）。"""
+    return df_to_records(services.hot_stocks(), date_cols=())
+
+
 @router.get("/day-movers", response_model=schemas.DayMovers)
 def day_movers(date: str = Query(..., description="交易日 YYYY-MM-DD")):
     """某交易日的上涨 / 下跌个股清单（名称、代码、开盘、最新、涨跌幅）。"""

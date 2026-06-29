@@ -82,6 +82,18 @@ export interface SearchRow {
   code_name: string | null;
 }
 
+export interface HotStock {
+  code: string;
+  code_name: string | null;
+  rank_no: number | null;
+  current_price: number | null;
+  pct_change: number | null;
+  hot: number | null;
+  concept: string | null;
+  rank_reason: string | null;
+  trade_date: string | null;
+}
+
 export interface CompanyInfo {
   code: string;
   code_name: string | null;

@@ -146,6 +146,16 @@ def company_info_df(code: str, path: str | None = None) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+def hot_stocks(limit: int = 12, path: str | None = None) -> pd.DataFrame:
+    """同花顺人气榜（按人气排名升序）。表不存在/无数据返回空 DataFrame。"""
+    try:
+        return db.query_df(
+            "SELECT * FROM ths_hot ORDER BY rank_no LIMIT ?", [limit], path=path
+        )
+    except Exception:
+        return pd.DataFrame()
+
+
 def day_movers(date: str, path: str | None = None) -> pd.DataFrame:
     """某交易日全部上涨/下跌个股（含名称、开盘价、收盘价、涨跌幅），按涨跌幅降序。
 

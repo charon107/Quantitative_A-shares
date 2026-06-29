@@ -47,6 +47,11 @@ def breadth_series() -> pd.DataFrame:
     return res if res is not None else pd.DataFrame()
 
 
+def hot_stocks() -> pd.DataFrame:
+    res, _ = cache.try_load("load_hot_stocks", fallback_fn=lambda: metrics.hot_stocks(12), ttl=86400)
+    return res if res is not None else pd.DataFrame()
+
+
 def day_movers(date: str) -> pd.DataFrame:
     res, _ = cache.try_load(
         "load_day_movers",

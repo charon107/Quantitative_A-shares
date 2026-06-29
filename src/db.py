@@ -42,6 +42,11 @@ COMPANY_COLUMNS = [
     "province", "city", "employees", "website", "email", "office",
     "main_business", "introduction", "business_scope",
 ]
+# 同花顺人气榜
+HOT_COLUMNS = [
+    "code", "code_name", "rank_no", "current_price", "pct_change",
+    "hot", "concept", "rank_reason", "trade_date",
+]
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS kline (
@@ -105,6 +110,19 @@ CREATE TABLE IF NOT EXISTS stock_info (
     main_business  VARCHAR,
     introduction   VARCHAR,
     business_scope VARCHAR
+);
+
+-- 同花顺人气榜（每日快照，只存最新一日；rank 是 SQL 关键字，列名用 rank_no）
+CREATE TABLE IF NOT EXISTS ths_hot (
+    code          VARCHAR PRIMARY KEY,
+    code_name     VARCHAR,
+    rank_no       INTEGER,
+    current_price DOUBLE,
+    pct_change    DOUBLE,
+    hot           DOUBLE,
+    concept       VARCHAR,
+    rank_reason   VARCHAR,
+    trade_date    VARCHAR
 );
 """
 
@@ -261,6 +279,24 @@ def upsert_company(df: pd.DataFrame, conn: duckdb.DuckDBPyConnection) -> int:
         f"SELECT {', '.join(COMPANY_COLUMNS)} FROM _company_in"
     )
     conn.unregister("_company_in")
+    return len(frame)
+
+
+def upsert_ths_hot(df: pd.DataFrame, conn: duckdb.DuckDBPyConnection) -> int:
+    """按 code UPSERT 同花顺人气榜。缺失列补 NULL。"""
+    if df is None or df.empty or "code" not in df.columns:
+        return 0
+    frame = df.copy()
+    for col in HOT_COLUMNS:
+        if col not in frame.columns:
+            frame[col] = pd.NA
+    frame = frame[HOT_COLUMNS].dropna(subset=["code"]).drop_duplicates("code")
+    conn.register("_hot_in", frame)
+    conn.execute(
+        f"INSERT OR REPLACE INTO ths_hot ({', '.join(HOT_COLUMNS)}) "
+        f"SELECT {', '.join(HOT_COLUMNS)} FROM _hot_in"
+    )
+    conn.unregister("_hot_in")
     return len(frame)
 
 

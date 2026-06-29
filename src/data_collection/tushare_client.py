@@ -218,6 +218,35 @@ def fetch_company_info() -> pd.DataFrame:
     return df
 
 
+def fetch_ths_hot(trade_date: str) -> pd.DataFrame:
+    """同花顺个股人气榜（data_type=='热股'，筛沪深主板）。
+
+    返回列：code/code_name/rank_no/current_price/pct_change/hot/concept/rank_reason/trade_date。
+    """
+    df = _call_with_retry("ths_hot", _pro().ths_hot, trade_date=_to_ts_date(trade_date))
+    if df is None or df.empty or "data_type" not in df.columns:
+        return pd.DataFrame()
+    df = df[df["data_type"].astype(str) == "热股"].copy()
+    if df.empty:
+        return pd.DataFrame()
+    df["code"] = df["ts_code"].apply(_safe_from_ts_code)
+    df = df.dropna(subset=["code"])
+    df = df[df["code"].str.match(r"^(sh\.60|sz\.00)\d{4}$", na=False)]
+    if df.empty:
+        return pd.DataFrame()
+    df = df.rename(columns={"ts_name": "code_name", "rank": "rank_no"})
+    for c in ("current_price", "pct_change", "hot"):
+        df[c] = pd.to_numeric(df.get(c), errors="coerce")
+    df["rank_no"] = pd.to_numeric(df["rank_no"], errors="coerce").astype("Int64")
+    df["trade_date"] = trade_date
+    cols = ["code", "code_name", "rank_no", "current_price", "pct_change",
+            "hot", "concept", "rank_reason", "trade_date"]
+    for c in cols:
+        if c not in df.columns:
+            df[c] = pd.NA
+    return df[cols].sort_values("rank_no").reset_index(drop=True)
+
+
 def fetch_daily_raw(code: str, start_date: str, end_date: str = "") -> pd.DataFrame:
     """拉取未复权日线原始价：date/open/high/low/close/volume/amount/pctChg。"""
     ts_code = _to_ts_code(code)

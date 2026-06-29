@@ -86,6 +86,18 @@ class SearchRow(BaseModel):
     code_name: str | None
 
 
+class HotStock(BaseModel):
+    code: str
+    code_name: str | None = None
+    rank_no: int | None = None
+    current_price: float | None = None
+    pct_change: float | None = None
+    hot: float | None = None
+    concept: str | None = None
+    rank_reason: str | None = None
+    trade_date: str | None = None
+
+
 class CompanyInfo(BaseModel):
     code: str
     code_name: str | None = None

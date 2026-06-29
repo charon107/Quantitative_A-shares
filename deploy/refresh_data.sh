@@ -28,6 +28,9 @@ uv run python -m src.data_collection.stock_price
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] 更新公司信息（stock_info）..."
 uv run python scripts/ingest_company_info.py || echo "[warn] 公司信息更新失败，跳过"
 
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] 更新同花顺人气榜（ths_hot）..."
+uv run python scripts/ingest_ths_hot.py || echo "[warn] 人气榜更新失败，跳过"
+
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] 入库完成，清空 Redis 缓存..."
 uv run python -m src.cache clear || true
 

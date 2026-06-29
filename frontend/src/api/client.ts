@@ -4,6 +4,7 @@ import type {
   BreadthPoint,
   CompanyInfo,
   DayMovers,
+  HotStock,
   IndexPoint,
   LimitPoint,
   MaDuration,
@@ -46,6 +47,9 @@ export const useLimitUpDown = () =>
 
 export const useBreadthSeries = () =>
   useQuery({ queryKey: ["breadthSeries"], queryFn: () => get<BreadthPoint[]>("/market/breadth-series") });
+
+export const useHotStocks = () =>
+  useQuery({ queryKey: ["hotStocks"], queryFn: () => get<HotStock[]>("/market/hot-stocks") });
 
 export const useDayMovers = (date: string | null) =>
   useQuery({
