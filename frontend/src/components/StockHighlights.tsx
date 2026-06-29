@@ -34,20 +34,18 @@ function MiniList({ title, metric, ascending, valueKind, onPick }: MiniListProps
             <button
               key={r.code}
               onClick={() => onPick(r.code)}
-              className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-sm transition hover:bg-panel2"
+              className="grid w-full grid-cols-[18px_minmax(0,1fr)_56px_84px] items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition hover:bg-panel2"
             >
-              <span className="flex min-w-0 items-center gap-2">
-                <span className="nums w-4 text-right text-xs text-muted">{i + 1}</span>
+              <span className="nums text-right text-xs text-muted">{i + 1}</span>
+              <span className="flex min-w-0 items-baseline gap-1.5">
                 <span className="truncate font-medium text-ink">{r.code_name ?? r.code}</span>
-                <span className="nums hidden text-[11px] text-muted sm:inline">{r.code}</span>
+                <span className="nums hidden shrink-0 text-[11px] text-muted sm:inline">{r.code}</span>
               </span>
-              <span className="flex shrink-0 items-center gap-3">
-                <span className="nums text-ink">{fmtPrice(r.close)}</span>
-                <span
-                  className={`nums w-16 text-right ${valueKind === "amount" ? "text-muted" : signClass(r.pctChg)}`}
-                >
-                  {valueKind === "amount" ? fmtAmount(r.amount) : fmtPct(r.pctChg)}
-                </span>
+              <span className="nums text-right text-ink">{fmtPrice(r.close)}</span>
+              <span
+                className={`nums whitespace-nowrap text-right ${valueKind === "amount" ? "text-muted" : signClass(r.pctChg)}`}
+              >
+                {valueKind === "amount" ? fmtAmount(r.amount) : fmtPct(r.pctChg)}
               </span>
             </button>
           ))
