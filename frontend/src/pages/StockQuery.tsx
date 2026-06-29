@@ -138,7 +138,9 @@ export function StockQuery({
 
       {code && fullscreen && (
         <FullscreenOverlay onClose={() => setFullscreen(false)}>
-          <KlineChart points={pts} focus={focus} rangeMode={rangeMode} onRange={handleRange} height={window.innerHeight - 80} />
+          <div className="h-full">
+            <KlineChart points={pts} focus={focus} rangeMode={rangeMode} onRange={handleRange} height="100%" />
+          </div>
         </FullscreenOverlay>
       )}
 

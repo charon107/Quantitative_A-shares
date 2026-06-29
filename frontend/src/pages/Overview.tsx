@@ -10,6 +10,7 @@ import { LimitUpDownChart } from "../charts/LimitUpDownChart";
 import { DayMoversPanel } from "../components/DayMoversPanel";
 import { fmtInt } from "../lib/format";
 import { useSliceByRange } from "../lib/useSliceByRange";
+import { C } from "../theme/echarts";
 
 const START = "2025-01-01";
 
@@ -65,8 +66,8 @@ export function Overview({ onOpenStock }: { onOpenStock: (code: string) => void 
           {ewi.isLoading ? <Loading /> : ewi.error ? <div className="p-4"><ErrorState error={ewi.error} /></div> : (
             <IndexLineChart
               series={[
-                { name: "全市场等权", points: ewiPoints, color: "#cc785c" },
-                { name: "上证等权", points: shewiPoints, color: "#3b82f6" },
+                { name: "全市场等权", points: ewiPoints, color: C.clay },
+                { name: "上证等权", points: shewiPoints, color: C.blue },
               ]}
             />
           )}

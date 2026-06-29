@@ -21,7 +21,7 @@ function KlineChartImpl({
   focus?: Focus | null;
   rangeMode?: boolean;
   onRange?: (stats: RangeStats | null) => void;
-  height?: number;
+  height?: number | string;
 }) {
   const chartRef = useRef<EChartsType | null>(null);
 

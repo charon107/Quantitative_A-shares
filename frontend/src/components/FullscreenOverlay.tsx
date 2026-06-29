@@ -22,7 +22,7 @@ export function FullscreenOverlay({ children, onClose }: { children: ReactNode; 
           ✕ 退出全屏
         </button>
       </div>
-      <div className="flex-1 p-2">{children}</div>
+      <div className="min-h-0 flex-1 p-2">{children}</div>
     </div>,
     document.body,
   );
