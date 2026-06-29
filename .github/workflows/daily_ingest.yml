@@ -40,6 +40,7 @@ jobs:
   # 绕开「服务器 -> 网关」对 ths_hot 的偶发读超时。需排在 ingest 之后（串行替换 DuckDB）。
   ths-hot:
     needs: ingest
+    if: ${{ always() }}   # 排在 ingest 之后串行（避免并发替换 DuckDB），但不受其成败影响
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
