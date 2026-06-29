@@ -21,24 +21,34 @@ if _ROOT not in sys.path:
 from src.data_collection import tushare_client as tsc  # noqa: E402
 
 
-def latest_trade_date() -> str:
+def recent_trade_dates(n: int = 6) -> list[str]:
+    """最近 n 个交易日，从新到旧。"""
     today = datetime.today().strftime("%Y-%m-%d")
-    start = (datetime.today() - timedelta(days=20)).strftime("%Y-%m-%d")
-    days = tsc.fetch_trade_dates(start, today)
-    return days[-1].strftime("%Y-%m-%d") if days else today
+    start = (datetime.today() - timedelta(days=25)).strftime("%Y-%m-%d")
+    days = [d.strftime("%Y-%m-%d") for d in tsc.fetch_trade_dates(start, today)]
+    return list(reversed(days))[:n] if days else [today]
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default="ths_hot.parquet")
-    ap.add_argument("--date", default="", help="交易日 YYYY-MM-DD，缺省取最近交易日")
+    ap.add_argument("--date", default="", help="交易日 YYYY-MM-DD，缺省取最近有数据的交易日")
     args = ap.parse_args()
 
-    d = args.date or latest_trade_date()
-    df = tsc.fetch_ths_hot(d)
-    # 即使为空也写出（让加载端决定跳过），保证 workflow 后续步骤有文件可传
+    candidates = [args.date] if args.date else recent_trade_dates()
+    # 从新到旧，取第一个有数据的交易日（今日热榜未发布时回退到上一交易日）
+    import pandas as pd
+    df = pd.DataFrame()
+    used = candidates[0] if candidates else ""
+    for d in candidates:
+        df = tsc.fetch_ths_hot(d)
+        if not df.empty:
+            used = d
+            break
+
+    # 即使最终为空也写出（加载端会跳过、保留旧数据）
     df.to_parquet(args.out, index=False)
-    print(f"[fetch_ths_hot] {d} 主板人气榜 {len(df)} 行 -> {os.path.abspath(args.out)}")
+    print(f"[fetch_ths_hot] {used} 主板人气榜 {len(df)} 行 -> {os.path.abspath(args.out)}")
 
 
 if __name__ == "__main__":
