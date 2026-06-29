@@ -48,9 +48,24 @@ export default function App() {
     <div className="min-h-screen bg-cream">
       <header className="sticky top-0 z-30 border-b border-line bg-cream/85 backdrop-blur">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-5 py-4">
-          <div className="flex items-baseline gap-3">
-            <span className="h-5 w-5 rounded-md bg-clay" aria-hidden />
-            <h1 className="text-xl font-semibold tracking-tight">A股股价看板</h1>
+          <div className="flex items-center gap-2.5">
+            <span
+              className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-clay to-clayDark shadow-soft ring-1 ring-clayDark/20"
+              aria-hidden
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeLinecap="round">
+                <line x1="8" y1="3.5" x2="8" y2="20.5" strokeWidth="1.8" />
+                <rect x="5.4" y="7" width="5.2" height="8" rx="1.3" fill="#fff" />
+                <line x1="16" y1="5.5" x2="16" y2="18.5" strokeWidth="1.8" />
+                <rect x="13.4" y="9.5" width="5.2" height="6" rx="1.3" fill="#fff" />
+              </svg>
+            </span>
+            <div className="flex flex-col leading-none">
+              <h1 className="text-[1.35rem] font-semibold tracking-tight text-ink">A股股价看板</h1>
+              <span className="mt-1 text-[11px] font-medium uppercase tracking-[0.2em] text-clay/80">
+                A-SHARE DASHBOARD
+              </span>
+            </div>
           </div>
           {status.data?.latest_date && (
             <span className="nums text-xs text-muted">
