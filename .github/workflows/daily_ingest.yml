@@ -1,58 +1,37 @@
 name: 每日入库 DuckDB
 
-# Tushare A股日线在收盘后约 15:00-16:00（北京时间）入库。
-# 这里在北京 17:17 触发，19:17 兜底；脚本幂等（只在拿到新数据时推进），
-# 节假日自动跳过（无新交易日则直接退出）。
+# 数据全部由 GitHub Actions runner（境外，直连 tushare 代理稳定）抓取成 parquet，
+# scp 到服务器后，服务器只做 DB 活（重算前复权、入库、原子替换、清/预热 Redis），
+# 全程不在服务器侧调用网关——绕开「服务器 -> 网关」网络不通的问题。
+#
+# Tushare A股日线收盘后约 15:00-16:00（北京时间）入库。北京 17:17 触发，19:17 兜底；
+# 幂等（INSERT OR REPLACE + 只对有新交易日的 code 重算前复权），节假日无新交易日自然无更新。
 on:
   schedule:
     - cron: "17 9 * * 1-5"   # 17:17 北京（UTC 09:17，工作日）
     - cron: "17 11 * * 1-5"  # 19:17 北京（兜底）
-  workflow_dispatch: {}       # 支持手动触发
+  workflow_dispatch: {}
 
 concurrency:
   group: daily-ingest
   cancel-in-progress: false
 
 jobs:
-  ingest:
+  daily:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: SSH 触发服务器入库（tushare -> DuckDB -> 清/预热 Redis）
-        uses: appleboy/ssh-action@v1.2.0
-        env:
-          TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
-          TUSHARE_API_URL: ${{ secrets.TUSHARE_API_URL }}
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          password: ${{ secrets.SERVER_PASSWORD }}
-          port: ${{ secrets.SERVER_PORT || 22 }}
-          command_timeout: 25m
-          # 把已验证的代理网关凭证转发到服务器（环境变量优先于 tushare.env）
-          envs: TUSHARE_TOKEN,TUSHARE_API_URL
-          script: |
-            set -e
-            cd /root/Quantitative_A-shares/WechatNum
-            bash deploy/refresh_data.sh
-
-  # 同花顺人气榜：由 runner 直连网关抓取（境外更稳），再回传服务器加载，
-  # 绕开「服务器 -> 网关」对 ths_hot 的偶发读超时。需排在 ingest 之后（串行替换 DuckDB）。
-  ths-hot:
-    needs: ingest
-    if: ${{ always() }}   # 排在 ingest 之后串行（避免并发替换 DuckDB），但不受其成败影响
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - name: runner 抓取人气榜 -> parquet
+
+      - name: runner 抓取全部数据 -> parquet
         env:
           TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
           TUSHARE_API_URL: ${{ secrets.TUSHARE_API_URL }}
         run: |
-          uv run --no-project --with tushare --with pandas --with pyarrow \
-            python scripts/fetch_ths_hot_parquet.py --out ths_hot.parquet
+          uv run --no-project --with tushare --with pandas --with pyarrow --with numpy \
+            python scripts/fetch_all_parquet.py --outdir artifacts --days 3
+
       - name: 传 parquet 到服务器
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -60,18 +39,24 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           password: ${{ secrets.SERVER_PASSWORD }}
           port: ${{ secrets.SERVER_PORT || 22 }}
-          source: ths_hot.parquet
-          target: /tmp/
-      - name: 服务器加载入库 + 预热
+          source: "artifacts/*"
+          target: "/tmp/ingest/"
+          strip_components: 1
+
+      - name: 服务器加载入库 + 清/预热 Redis
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           password: ${{ secrets.SERVER_PASSWORD }}
           port: ${{ secrets.SERVER_PORT || 22 }}
-          command_timeout: 10m
+          command_timeout: 25m
           script: |
             set -e
             cd /root/Quantitative_A-shares/WechatNum
-            DUCKDB_PATH=/root/Quantitative_A-shares/WechatNum/market.duckdb \
-              /root/.local/bin/uv run python scripts/load_ths_hot_parquet.py /tmp/ths_hot.parquet
+            export PATH="/root/.local/bin:$PATH"
+            export DUCKDB_PATH=/root/Quantitative_A-shares/WechatNum/market.duckdb
+            export INGEST_STATE_PATH=/root/Quantitative_A-shares/WechatNum/ingest_state.json
+            uv run python scripts/load_all_parquet.py /tmp/ingest
+            uv run python deploy/warmup_redis.py || true
+            rm -rf /tmp/ingest
