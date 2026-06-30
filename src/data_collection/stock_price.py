@@ -235,9 +235,8 @@ def persist(stock_df, raw_rows_by_code, factor_rows_by_code, delisted=None) -> d
         # 3) 刷新代码->名称
         db.upsert_meta(name_map_frame(stock_df), conn)
 
-        # 4) 清理退市股（从所有按 code 存储的表删除）
-        if delisted:
-            stats["PURGED"] = db.delete_codes(delisted, conn)
+        # 4) 清理退市股：list_status='D' + 名字带「退」（退市整理期），从所有表删除
+        stats["PURGED"] = db.purge_delisted(conn, delisted)
     finally:
         conn.close()
 
@@ -253,8 +252,7 @@ def build_name_map_only(delisted=None):
     purged = 0
     try:
         n = db.upsert_meta(name_map_frame(stock_df), conn)
-        if delisted:
-            purged = db.delete_codes(delisted, conn)
+        purged = db.purge_delisted(conn, delisted)
     finally:
         conn.close()
     db.atomic_swap(tmp, dest)

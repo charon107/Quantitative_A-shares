@@ -315,6 +315,28 @@ def delete_codes(codes, conn: duckdb.DuckDBPyConnection) -> int:
     return len(codes)
 
 
+def delisted_named_codes(conn: duckdb.DuckDBPyConnection) -> set[str]:
+    """stock_meta 中名字标记退市的 code（以「退市」开头或以「退」结尾）。
+
+    退市整理期股票仍在交易、tushare 仍是 list_status='L'，list_status='D' 抓不到，
+    只能靠命名特征（退市XX / XX退）识别。A股主板几乎不会有正常股名字带这种特征。
+    """
+    rows = conn.execute(
+        "SELECT code FROM stock_meta WHERE code_name LIKE '退市%' OR code_name LIKE '%退'"
+    ).fetchall()
+    return {r[0] for r in rows}
+
+
+def purge_delisted(conn: duckdb.DuckDBPyConnection, extra_codes=None) -> int:
+    """清理退市股：tushare 的 list_status='D' 集合(extra_codes) ∪ 名字带「退」的。
+
+    需在 upsert_meta 刷新名称之后调用，保证 stock_meta 里是最新名称。返回删除的 code 数。
+    """
+    codes = set(extra_codes or [])
+    codes |= delisted_named_codes(conn)
+    return delete_codes(codes, conn)
+
+
 def atomic_swap(tmp_path: str, dest_path: str | None = None) -> None:
     """把临时库文件原子替换到正式路径（同盘 os.replace 原子）。"""
     dest = dest_path or DUCKDB_PATH

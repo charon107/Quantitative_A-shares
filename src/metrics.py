@@ -22,11 +22,15 @@ MA_WINDOWS = (5, 10, 20, 60)
 
 # ========== 全市场最新一日 ==========
 def load_all_latest_day(path: str | None = None) -> pd.DataFrame:
-    """每只股票最新一日的 OHLCV（全市场快照）。无数据返回空 DataFrame。"""
+    """全市场最新交易日的 OHLCV 快照。无数据返回空 DataFrame。
+
+    锚定到全库最新一日（MAX(date)），而非每只票各自的最后一行——否则退市/长期停牌
+    股票那条冻结的旧行情会被当成"最新一日"混进涨跌幅榜。
+    """
     return db.query_df(
         """
         SELECT * FROM kline
-        QUALIFY row_number() OVER (PARTITION BY code ORDER BY date DESC) = 1
+        WHERE date = (SELECT MAX(date) FROM kline)
         """,
         path=path,
     )
