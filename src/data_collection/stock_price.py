@@ -199,10 +199,10 @@ def existing_raw_codes() -> set[str]:
         return set()
 
 
-def persist(stock_df, raw_rows_by_code, factor_rows_by_code) -> dict:
-    """把新抓取的数据写入 DuckDB，按 code 重算 qfq，刷新 stock_meta。返回统计。"""
+def persist(stock_df, raw_rows_by_code, factor_rows_by_code, delisted=None) -> dict:
+    """把新抓取的数据写入 DuckDB，按 code 重算 qfq，刷新 stock_meta，清理退市股。返回统计。"""
     conn, tmp, dest = _open_write_copy()
-    stats = {"UPDATED": 0, "EMPTY": 0, "ERROR": 0}
+    stats = {"UPDATED": 0, "EMPTY": 0, "ERROR": 0, "PURGED": 0}
     errors: list[tuple[str, str]] = []
     try:
         # 1) 原始价 + 复权因子入库
@@ -234,6 +234,10 @@ def persist(stock_df, raw_rows_by_code, factor_rows_by_code) -> dict:
 
         # 3) 刷新代码->名称
         db.upsert_meta(name_map_frame(stock_df), conn)
+
+        # 4) 清理退市股（从所有按 code 存储的表删除）
+        if delisted:
+            stats["PURGED"] = db.delete_codes(delisted, conn)
     finally:
         conn.close()
 
@@ -242,16 +246,19 @@ def persist(stock_df, raw_rows_by_code, factor_rows_by_code) -> dict:
     return stats
 
 
-def build_name_map_only():
-    """仅刷新 stock_meta（不拉 K线）。"""
+def build_name_map_only(delisted=None):
+    """仅刷新 stock_meta（不拉 K线），顺带清理退市股。"""
     stock_df = get_stock_list()
     conn, tmp, dest = _open_write_copy()
+    purged = 0
     try:
         n = db.upsert_meta(name_map_frame(stock_df), conn)
+        if delisted:
+            purged = db.delete_codes(delisted, conn)
     finally:
         conn.close()
     db.atomic_swap(tmp, dest)
-    print(f"[name-map] 已刷新 {n} 条代码->名称到 {dest}")
+    print(f"[name-map] 已刷新 {n} 条代码->名称到 {dest}（清理退市股 {purged} 只）")
 
 
 # =========================
@@ -274,9 +281,16 @@ def main():
 
     codes = stock_df["code"].tolist()
 
+    # 退市清单（容错：抓取失败不阻断入库，仅本次跳过清理）
+    try:
+        delisted = set(tsc.fetch_delisted_codes())
+    except Exception as e:
+        print(f"[Warn] 退市清单抓取失败，本次跳过清理：{e}")
+        delisted = set()
+
     if not needed_dates:
         print("[Skip] 数据已是最新。仅刷新名称映射。")
-        build_name_map_only()
+        build_name_map_only(delisted)
         state["last_run"] = datetime.today().strftime("%Y-%m-%d %H:%M:%S")
         save_state(state)
         return
@@ -320,7 +334,7 @@ def main():
         except Exception:
             pass
 
-    stats = persist(stock_df, raw_rows_by_code, factor_rows_by_code)
+    stats = persist(stock_df, raw_rows_by_code, factor_rows_by_code, delisted)
 
     if actual_last_date:
         state["last_complete_date"] = actual_last_date
@@ -341,6 +355,11 @@ def main():
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "name-map":
-        build_name_map_only()
+        try:
+            _delisted = set(tsc.fetch_delisted_codes())
+        except Exception as e:
+            print(f"[Warn] 退市清单抓取失败，本次跳过清理：{e}")
+            _delisted = set()
+        build_name_map_only(_delisted)
     else:
         main()

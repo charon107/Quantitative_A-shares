@@ -161,6 +161,24 @@ def fetch_stock_basic() -> pd.DataFrame:
     return df[["code", "code_name"]]
 
 
+def fetch_delisted_codes() -> list[str]:
+    """全市场已退市股票 code（sh.600000 风格）。用 list_status='D'。
+
+    显式取已退市清单：即使响应不完整也只是"少删几个"，绝不会误删在市股
+    （比"用在市列表取差集"更安全）。
+    """
+    df = _call_with_retry(
+        "fetch_delisted_codes",
+        _pro().stock_basic,
+        exchange="", list_status="D",
+        fields="ts_code,name,delist_date",
+    )
+    if df is None or df.empty:
+        return []
+    codes = df["ts_code"].apply(_safe_from_ts_code).dropna()
+    return codes.tolist()
+
+
 def _safe_from_ts_code(ts_code) -> str | None:
     try:
         return _from_ts_code(ts_code)

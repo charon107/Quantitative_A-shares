@@ -300,6 +300,21 @@ def upsert_ths_hot(df: pd.DataFrame, conn: duckdb.DuckDBPyConnection) -> int:
     return len(frame)
 
 
+# 所有按 code 存储的表（退市清理时统一删除）
+PURGE_TABLES = ("kline", "raw_kline", "adj_factor", "stock_meta", "stock_info", "ths_hot")
+
+
+def delete_codes(codes, conn: duckdb.DuckDBPyConnection) -> int:
+    """从所有按 code 存储的表删除给定 code（退市清理）。返回删除的 code 数。"""
+    codes = [c for c in dict.fromkeys(codes) if c]  # 去重去空，保序
+    if not codes:
+        return 0
+    placeholders = ", ".join(["?"] * len(codes))
+    for tbl in PURGE_TABLES:
+        conn.execute(f"DELETE FROM {tbl} WHERE code IN ({placeholders})", codes)
+    return len(codes)
+
+
 def atomic_swap(tmp_path: str, dest_path: str | None = None) -> None:
     """把临时库文件原子替换到正式路径（同盘 os.replace 原子）。"""
     dest = dest_path or DUCKDB_PATH
