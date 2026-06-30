@@ -38,7 +38,9 @@ def main() -> None:
     meta = _read(d, "meta.parquet")
     comp = _read(d, "company.parquet")
     hot = _read(d, "ths_hot.parquet")
-    print(f"[load_all] 输入：raw={len(raw)} adj={len(adj)} meta={len(meta)} company={len(comp)} hot={len(hot)}")
+    delisted = _read(d, "delisted.parquet")
+    delisted_codes = delisted["code"].tolist() if not delisted.empty and "code" in delisted.columns else []
+    print(f"[load_all] 输入：raw={len(raw)} adj={len(adj)} meta={len(meta)} company={len(comp)} hot={len(hot)} delisted={len(delisted_codes)}")
 
     dest = db.DUCKDB_PATH
     tmp = dest + ".new"
@@ -49,6 +51,7 @@ def main() -> None:
 
     last_date = None
     n_qfq = 0
+    purged = 0
     with db.connect(read_only=False, path=tmp) as conn:
         db.init_schema(conn)
         kmax_row = conn.execute("SELECT MAX(date) FROM kline").fetchone()
@@ -87,6 +90,9 @@ def main() -> None:
             conn.execute("DELETE FROM ths_hot")
             db.upsert_ths_hot(hot, conn)
 
+        # 清理退市股：runner 给的 list_status='D' + stock_meta 中名字带「退」（退市整理期）
+        purged = db.purge_delisted(conn, delisted_codes)
+
         nm = conn.execute("SELECT MAX(date) FROM kline").fetchone()[0]
         last_date = nm.strftime("%Y-%m-%d") if nm else None
 
@@ -106,7 +112,7 @@ def main() -> None:
 
     # 清 Redis（预热交给 warmup_redis.py）
     cache.invalidate_all()
-    print(f"[load_all] 完成：重算 qfq {n_qfq} 只，最新交易日 {last_date} -> {os.path.abspath(dest)}")
+    print(f"[load_all] 完成：重算 qfq {n_qfq} 只，清理退市股 {purged} 只，最新交易日 {last_date} -> {os.path.abspath(dest)}")
 
 
 if __name__ == "__main__":

@@ -91,6 +91,15 @@ def main() -> None:
     )
     meta.to_parquet(f"{od}/meta.parquet", index=False)
 
+    # 退市清单（list_status=D；runner 直连网关，服务器侧据此精确清理退市股）
+    try:
+        delisted = tsc.fetch_delisted_codes()
+    except Exception as e:
+        print(f"[fetch_all] delisted 失败：{e}")
+        delisted = []
+    delisted = [c for c in delisted if _MB.match(str(c))]
+    pd.DataFrame({"code": delisted}).to_parquet(f"{od}/delisted.parquet", index=False)
+
     # 人气榜（从最近交易日往前取第一个有数据的）
     hot = pd.DataFrame()
     for d in reversed(_recent_days(6)):
@@ -104,7 +113,7 @@ def main() -> None:
 
     print(
         f"[fetch_all] raw={len(raw_df)} adj={len(adj_df)} "
-        f"company={len(comp)} meta={len(meta)} hot={len(hot)} -> {os.path.abspath(od)}"
+        f"company={len(comp)} meta={len(meta)} hot={len(hot)} delisted={len(delisted)} -> {os.path.abspath(od)}"
     )
 
 
