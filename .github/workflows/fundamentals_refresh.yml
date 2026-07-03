@@ -1,0 +1,65 @@
+name: 基本面财务刷新 + 逐年选股
+
+# 财务数据变动频率低（年报 4 月、半年报 8 月、三季报 10 月披露），无需每日抓。
+# runner 抓 fina_indicator/income/cashflow/index_daily -> parquet，scp 到服务器，
+# 服务器 upsert stock_fundamental/index_daily -> 跑逐年选股写 selected_stocks。
+# 与每日日线入库（daily_ingest.yml）解耦，避免给日线链路增加限频压力。
+on:
+  schedule:
+    - cron: "23 1 5 5,9,11 *"   # 财报季次月上旬各跑一次（北京 09:23 前后）
+  workflow_dispatch:
+    inputs:
+      full:
+        description: "全历史回填（首次或需要重建时勾选）"
+        type: boolean
+        default: false
+
+concurrency:
+  group: fundamentals-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+
+      - name: runner 抓财务/指数 -> parquet
+        env:
+          TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
+          TUSHARE_API_URL: ${{ secrets.TUSHARE_API_URL }}
+        run: |
+          FLAG=""
+          if [ "${{ github.event.inputs.full }}" = "true" ]; then FLAG="--full"; fi
+          uv run --no-project --with tushare --with pandas --with pyarrow --with numpy \
+            python scripts/fetch_fundamentals_parquet.py --outdir artifacts_fund $FLAG
+
+      - name: 传 parquet 到服务器
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          source: "artifacts_fund/*"
+          target: "/tmp/ingest_fund/"
+          strip_components: 1
+
+      - name: 服务器入库 + 跑选股 + 清/预热 Redis
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          command_timeout: 60m
+          script: |
+            set -e
+            cd /root/Quantitative_A-shares/WechatNum
+            export PATH="/root/.local/bin:$PATH"
+            export DUCKDB_PATH=/root/Quantitative_A-shares/WechatNum/market.duckdb
+            uv run python scripts/load_fundamentals.py /tmp/ingest_fund
+            uv run python deploy/warmup_redis.py || true
+            rm -rf /tmp/ingest_fund

@@ -289,6 +289,110 @@ def ma_duration_samples(
     return detail
 
 
+# ========== 基本面选股（逐年回测） ==========
+INDEX_CODE = "sh.000001"  # 上证综指，选股股价图对照
+
+
+def selection_years(path: str | None = None) -> list[int]:
+    """有选股结果的年份列表（升序）。表不存在/无数据返回空列表。"""
+    try:
+        df = db.query_df("SELECT DISTINCT year FROM selected_stocks ORDER BY year", path=path)
+    except Exception:
+        return []
+    if df.empty:
+        return []
+    return [int(y) for y in df["year"].tolist()]
+
+
+def selected_stocks_by_year(year: int, path: str | None = None) -> pd.DataFrame:
+    """某年选出的股票池，带上该股选股窗口末年(year-1)的展示财务指标。
+
+    列：code / code_name / roe / netprofit_yoy / debt_to_assets / net_profit。
+    """
+    try:
+        return db.query_df(
+            """
+            SELECT s.code, s.code_name,
+                   f.roe, f.netprofit_yoy, f.debt_to_assets, f.net_profit
+            FROM selected_stocks s
+            LEFT JOIN stock_fundamental f
+              ON s.code = f.code AND f.year = ? - 1
+            WHERE s.year = ?
+            ORDER BY s.code
+            """,
+            [year, year],
+            path=path,
+        )
+    except Exception:
+        return pd.DataFrame()
+
+
+def _window_line(df: pd.DataFrame, start: str, end: str | None, ma_n: int) -> pd.DataFrame:
+    """截取 [start, end] 收盘价并在窗口内算 MA。列：date/close/ma。"""
+    if df.empty:
+        return pd.DataFrame(columns=["date", "close", "ma"])
+    out = df[["date", "close"]].copy()
+    out["date"] = pd.to_datetime(out["date"], errors="coerce")
+    out["close"] = pd.to_numeric(out["close"], errors="coerce")
+    out = out.dropna(subset=["date", "close"]).sort_values("date")
+    out = out[out["date"] >= pd.to_datetime(start)]
+    if end:
+        out = out[out["date"] <= pd.to_datetime(end)]
+    out["ma"] = out["close"].rolling(window=ma_n).mean()
+    return out.reset_index(drop=True)
+
+
+def screening_chart(year: int, code: str, ma_n: int = 20, path: str | None = None) -> dict:
+    """复刻原 matplotlib 三特性所需的数据：
+
+    - 个股/指数收盘价:从 {year}-01-01 截断到「次年首个财报公布日」(next_pub)
+    - pub_dates:当年(日历年 year)内的财报公布日竖线
+    - next_pub:模拟持有到下次财报的截断终点
+
+    返回 dict：code/code_name/next_pub/pub_dates/stock[]/index[]。
+    """
+    # 该 code 各财年的公布日（ann_date 为 'YYYY-MM-DD'）
+    try:
+        anns = db.query_df(
+            "SELECT ann_date FROM stock_fundamental WHERE code = ? AND ann_date IS NOT NULL",
+            [code], path=path,
+        )
+    except Exception:
+        anns = pd.DataFrame()
+    ann_dates = sorted(pd.to_datetime(anns["ann_date"], errors="coerce").dropna().tolist()) if not anns.empty else []
+
+    y_start = pd.Timestamp(year=year, month=1, day=1)
+    y_end = pd.Timestamp(year=year + 1, month=1, day=1)
+    y1_end = pd.Timestamp(year=year + 2, month=1, day=1)
+    pub_dates = [d for d in ann_dates if y_start <= d < y_end]
+    next_list = [d for d in ann_dates if y_end <= d < y1_end]
+    next_pub = next_list[0] if next_list else None
+
+    start = f"{year}-01-01"
+    end = next_pub.strftime("%Y-%m-%d") if next_pub is not None else None
+
+    try:
+        stock_raw = load_stock_kline(code, path=path)
+    except LookupError:
+        stock_raw = pd.DataFrame(columns=["date", "close"])
+    idx_raw = db.query_df(
+        "SELECT date, close FROM index_daily WHERE code = ? ORDER BY date", [INDEX_CODE], path=path,
+    )
+
+    stock_line = _window_line(stock_raw, start, end, ma_n)
+    index_line = _window_line(idx_raw, start, end, ma_n)
+
+    nm = name_map(path=path)
+    return {
+        "code": code,
+        "code_name": nm.get(code),
+        "next_pub": end,
+        "pub_dates": [d.strftime("%Y-%m-%d") for d in pub_dates],
+        "stock": stock_line,
+        "index": index_line,
+    }
+
+
 # ========== 数据状态 ==========
 def data_status(path: str | None = None) -> dict:
     """数据新鲜度与覆盖：最新交易日、覆盖股票数、总行数。"""

@@ -70,3 +70,18 @@ def ma_duration() -> pd.DataFrame:
 def name_map() -> dict:
     res, _ = cache.try_load("load_name_map", fallback_fn=metrics.name_map, ttl=86400)
     return res if res is not None else {}
+
+
+def selection_years() -> list[int]:
+    res, _ = cache.try_load("load_selection_years", fallback_fn=metrics.selection_years, ttl=86400)
+    return res if res is not None else []
+
+
+def selected_by_year(year: int) -> pd.DataFrame:
+    res, _ = cache.try_load(
+        "load_selected_by_year",
+        relevant_params={"year": year},
+        fallback_fn=lambda: metrics.selected_stocks_by_year(year),
+        ttl=86400,
+    )
+    return res if res is not None else pd.DataFrame()

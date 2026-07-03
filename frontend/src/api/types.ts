@@ -148,3 +148,27 @@ export interface Status {
 }
 
 export type RankMetric = "pctChg" | "amount" | "turn";
+
+export interface ScreeningRow {
+  code: string;
+  code_name: string | null;
+  roe: number | null;
+  netprofit_yoy: number | null;
+  debt_to_assets: number | null;
+  net_profit: number | null;
+}
+
+export interface ChartLinePoint {
+  date: string;
+  close: number | null;
+  ma: number | null;
+}
+
+export interface ScreeningChart {
+  code: string;
+  code_name: string | null;
+  next_pub: string | null;
+  pub_dates: string[];
+  stock: ChartLinePoint[];
+  index: ChartLinePoint[];
+}

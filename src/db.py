@@ -47,6 +47,13 @@ HOT_COLUMNS = [
     "code", "code_name", "rank_no", "current_price", "pct_change",
     "hot", "concept", "rank_reason", "trade_date",
 ]
+# 基本面财务（年报口径，来自 tushare fina_indicator + income + cashflow）
+FUNDAMENTAL_COLUMNS = [
+    "code", "year", "ann_date", "roe", "netprofit_yoy",
+    "debt_to_assets", "net_profit", "cfo",
+]
+# 逐年回测选股池（来自 fundamental_screen.run_selection）
+SELECTED_COLUMNS = ["year", "code", "code_name"]
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS kline (
@@ -123,6 +130,35 @@ CREATE TABLE IF NOT EXISTS ths_hot (
     concept       VARCHAR,
     rank_reason   VARCHAR,
     trade_date    VARCHAR
+);
+
+-- 基本面财务（年报口径；roe/netprofit_yoy/debt_to_assets 已在采集层 ÷100 转小数）
+CREATE TABLE IF NOT EXISTS stock_fundamental (
+    code           VARCHAR NOT NULL,
+    year           INTEGER NOT NULL,
+    ann_date       VARCHAR,
+    roe            DOUBLE,
+    netprofit_yoy  DOUBLE,
+    debt_to_assets DOUBLE,
+    net_profit     DOUBLE,
+    cfo            DOUBLE,
+    PRIMARY KEY (code, year)
+);
+
+-- 指数日线收盘价（如上证综指 sh.000001，用于选股股价图对照；指数不参与退市清理）
+CREATE TABLE IF NOT EXISTS index_daily (
+    code  VARCHAR NOT NULL,
+    date  DATE    NOT NULL,
+    close DOUBLE,
+    PRIMARY KEY (code, date)
+);
+
+-- 逐年回测选股池（每年选出的股票；整表随每次选股全量替换）
+CREATE TABLE IF NOT EXISTS selected_stocks (
+    year      INTEGER NOT NULL,
+    code      VARCHAR NOT NULL,
+    code_name VARCHAR,
+    PRIMARY KEY (year, code)
 );
 """
 
@@ -300,8 +336,62 @@ def upsert_ths_hot(df: pd.DataFrame, conn: duckdb.DuckDBPyConnection) -> int:
     return len(frame)
 
 
-# 所有按 code 存储的表（退市清理时统一删除）
-PURGE_TABLES = ("kline", "raw_kline", "adj_factor", "stock_meta", "stock_info", "ths_hot")
+def upsert_fundamental(df: pd.DataFrame, conn: duckdb.DuckDBPyConnection) -> int:
+    """按 (code, year) UPSERT 年报财务。缺失列补 NULL。"""
+    if df is None or df.empty or "code" not in df.columns:
+        return 0
+    frame = df.copy()
+    for col in FUNDAMENTAL_COLUMNS:
+        if col not in frame.columns:
+            frame[col] = pd.NA
+    frame = frame[FUNDAMENTAL_COLUMNS].dropna(subset=["code", "year"]).drop_duplicates(["code", "year"])
+    conn.register("_fund_in", frame)
+    conn.execute(
+        f"INSERT OR REPLACE INTO stock_fundamental ({', '.join(FUNDAMENTAL_COLUMNS)}) "
+        f"SELECT {', '.join(FUNDAMENTAL_COLUMNS)} FROM _fund_in"
+    )
+    conn.unregister("_fund_in")
+    return len(frame)
+
+
+def upsert_index_daily(df: pd.DataFrame, conn: duckdb.DuckDBPyConnection) -> int:
+    """按 (code, date) UPSERT 指数日线。期望列 code/date/close。"""
+    if df is None or df.empty:
+        return 0
+    frame = df.copy()[["code", "date", "close"]]
+    conn.register("_idx_in", frame)
+    conn.execute(
+        "INSERT OR REPLACE INTO index_daily (code, date, close) "
+        "SELECT code, CAST(date AS DATE) AS date, close FROM _idx_in"
+    )
+    conn.unregister("_idx_in")
+    return len(frame)
+
+
+def replace_selected_stocks(df: pd.DataFrame, conn: duckdb.DuckDBPyConnection) -> int:
+    """整表全量替换逐年选股池。期望列 year/code/code_name。"""
+    conn.execute("DELETE FROM selected_stocks")
+    if df is None or df.empty:
+        return 0
+    frame = df.copy()
+    for col in SELECTED_COLUMNS:
+        if col not in frame.columns:
+            frame[col] = pd.NA
+    frame = frame[SELECTED_COLUMNS].dropna(subset=["year", "code"]).drop_duplicates(["year", "code"])
+    conn.register("_sel_in", frame)
+    conn.execute(
+        "INSERT OR REPLACE INTO selected_stocks (year, code, code_name) "
+        "SELECT year, code, code_name FROM _sel_in"
+    )
+    conn.unregister("_sel_in")
+    return len(frame)
+
+
+# 所有按 code 存储的表（退市清理时统一删除）；index_daily 是指数不参与
+PURGE_TABLES = (
+    "kline", "raw_kline", "adj_factor", "stock_meta", "stock_info",
+    "ths_hot", "stock_fundamental", "selected_stocks",
+)
 
 
 def delete_codes(codes, conn: duckdb.DuckDBPyConnection) -> int:

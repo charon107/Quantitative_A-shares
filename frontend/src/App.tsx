@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Overview } from "./pages/Overview";
 import { StockQuery } from "./pages/StockQuery";
 import { Rankings } from "./pages/Rankings";
+import { Screening } from "./pages/Screening";
 import { MaDuration } from "./pages/MaDuration";
 import { Status } from "./pages/Status";
 import { useStatus } from "./api/client";
@@ -10,6 +11,7 @@ const PAGES = [
   { key: "overview", label: "大盘概览" },
   { key: "stock", label: "个股查询" },
   { key: "rankings", label: "排行榜" },
+  { key: "screening", label: "基本面选股" },
   { key: "maDuration", label: "多头时长" },
   { key: "status", label: "数据状态" },
 ] as const;
@@ -103,6 +105,7 @@ export default function App() {
           />
         )}
         {page === "rankings" && <Rankings onOpenStock={openStock} />}
+        {page === "screening" && <Screening onOpenStock={openStock} />}
         {page === "maDuration" && (
           <MaDuration
             initialPick={maDurationPick}

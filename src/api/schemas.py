@@ -145,6 +145,30 @@ class MaDuration(BaseModel):
     samples: list[DurationSample]
 
 
+class ScreeningRow(BaseModel):
+    code: str
+    code_name: str | None = None
+    roe: float | None = None
+    netprofit_yoy: float | None = None
+    debt_to_assets: float | None = None
+    net_profit: float | None = None
+
+
+class ChartLinePoint(BaseModel):
+    date: str
+    close: float | None = None
+    ma: float | None = None
+
+
+class ScreeningChart(BaseModel):
+    code: str
+    code_name: str | None = None
+    next_pub: str | None = None
+    pub_dates: list[str]
+    stock: list[ChartLinePoint]
+    index: list[ChartLinePoint]
+
+
 class Status(BaseModel):
     latest_date: str | None
     n_codes: int

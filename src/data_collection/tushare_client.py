@@ -444,6 +444,113 @@ def fetch_turnover_by_date(trade_date: str) -> pd.DataFrame:
     return df[["code", "date", "turn"]]
 
 
+def _year_from_end_date(s: pd.Series) -> pd.Series:
+    """从 tushare 报告期 end_date（'YYYYMMDD'）取年份 Int64；非年报(非 1231)返回 NA 交由调用方过滤。"""
+    end = s.astype(str)
+    year = pd.to_numeric(end.str.slice(0, 4), errors="coerce").astype("Int64")
+    is_annual = end.str.slice(4, 8) == "1231"
+    return year.where(is_annual, other=pd.NA)
+
+
+def _ann_date_iso(s: pd.Series) -> pd.Series:
+    """tushare 公告日 'YYYYMMDD' -> 'YYYY-MM-DD'（无法解析返回 NA）。"""
+    return s.astype(str).map(_fmt_date8)
+
+
+def fetch_fina_indicator(code: str) -> pd.DataFrame:
+    """单只股票的财务指标（年报口径），一次请求拿全部报告期。
+
+    tushare fina_indicator 的 roe/netprofit_yoy/debt_to_assets 是百分数（15.0），
+    这里统一 ÷100 转小数，与旧 baostock 口径（0.15）一致，让下游选股阈值常量不必改。
+
+    返回列：code/year/ann_date/roe/netprofit_yoy/debt_to_assets（仅年报行）。
+    """
+    ts_code = _to_ts_code(code)
+    df = _call_with_retry(
+        f"fetch_fina_indicator({code})",
+        _pro().fina_indicator,
+        ts_code=ts_code,
+        fields="ann_date,end_date,roe,netprofit_yoy,debt_to_assets",
+    )
+    if df is None or df.empty:
+        return pd.DataFrame(columns=["code", "year", "ann_date", "roe", "netprofit_yoy", "debt_to_assets"])
+    df = df.copy()
+    df["year"] = _year_from_end_date(df["end_date"])
+    df = df.dropna(subset=["year"])
+    df["ann_date"] = _ann_date_iso(df["ann_date"])
+    for c in ("roe", "netprofit_yoy", "debt_to_assets"):
+        df[c] = pd.to_numeric(df.get(c), errors="coerce") / 100.0
+    df["code"] = code
+    df = df.sort_values("year").drop_duplicates("year", keep="last")
+    return df[["code", "year", "ann_date", "roe", "netprofit_yoy", "debt_to_assets"]].reset_index(drop=True)
+
+
+def fetch_income(code: str) -> pd.DataFrame:
+    """单只股票的利润表（年报口径）净利润。返回 code/year/net_profit（归母优先，退回 n_income）。"""
+    ts_code = _to_ts_code(code)
+    df = _call_with_retry(
+        f"fetch_income({code})",
+        _pro().income,
+        ts_code=ts_code,
+        fields="end_date,n_income,n_income_attr_p",
+    )
+    if df is None or df.empty:
+        return pd.DataFrame(columns=["code", "year", "net_profit"])
+    df = df.copy()
+    df["year"] = _year_from_end_date(df["end_date"])
+    df = df.dropna(subset=["year"])
+    attr = pd.to_numeric(df.get("n_income_attr_p"), errors="coerce")
+    total = pd.to_numeric(df.get("n_income"), errors="coerce")
+    df["net_profit"] = attr.fillna(total)
+    df["code"] = code
+    df = df.sort_values("year").drop_duplicates("year", keep="last")
+    return df[["code", "year", "net_profit"]].reset_index(drop=True)
+
+
+def fetch_cashflow(code: str) -> pd.DataFrame:
+    """单只股票的现金流量表（年报口径）经营活动现金流净额。返回 code/year/cfo。"""
+    ts_code = _to_ts_code(code)
+    df = _call_with_retry(
+        f"fetch_cashflow({code})",
+        _pro().cashflow,
+        ts_code=ts_code,
+        fields="end_date,n_cashflow_act",
+    )
+    if df is None or df.empty:
+        return pd.DataFrame(columns=["code", "year", "cfo"])
+    df = df.copy()
+    df["year"] = _year_from_end_date(df["end_date"])
+    df = df.dropna(subset=["year"])
+    df["cfo"] = pd.to_numeric(df.get("n_cashflow_act"), errors="coerce")
+    df["code"] = code
+    df = df.sort_values("year").drop_duplicates("year", keep="last")
+    return df[["code", "year", "cfo"]].reset_index(drop=True)
+
+
+def fetch_index_daily(index_code: str = "sh.000001", start_date: str = "", end_date: str = "") -> pd.DataFrame:
+    """指数日线收盘价（官方 daily 不含指数，须用 index_daily）。返回 code/date/close。
+
+    index_code 用项目内部 sh.000001 风格，内部转 000001.SH 调用。
+    """
+    ts_code = _to_ts_code(index_code)
+    df = _call_with_retry(
+        f"fetch_index_daily({index_code})",
+        _pro().index_daily,
+        ts_code=ts_code,
+        start_date=_to_ts_date(start_date),
+        end_date=_to_ts_date(end_date),
+        fields="trade_date,close",
+    )
+    if df is None or df.empty:
+        return pd.DataFrame(columns=["code", "date", "close"])
+    df = df.copy()
+    df["date"] = pd.to_datetime(df["trade_date"], format="%Y%m%d", errors="coerce")
+    df["close"] = pd.to_numeric(df["close"], errors="coerce")
+    df["code"] = index_code
+    df = df.dropna(subset=["date"]).sort_values("date").drop_duplicates("date", keep="last")
+    return df[["code", "date", "close"]].reset_index(drop=True)
+
+
 def fetch_trade_dates(start_date: str, end_date: str) -> list:
     """返回 [start_date, end_date] 区间内的实际交易日（按 cal_date 升序的 Timestamp 列表）。"""
     df = _call_with_retry(

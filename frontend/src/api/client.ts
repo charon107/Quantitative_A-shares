@@ -10,6 +10,8 @@ import type {
   MaDuration,
   RankMetric,
   RankingRow,
+  ScreeningChart,
+  ScreeningRow,
   SearchRow,
   Status,
   StockKline,
@@ -94,6 +96,23 @@ export const useVolatility = (code: string | null, window = 20) =>
     queryKey: ["vol", code, window],
     queryFn: () => get<VolatilityPoint[]>(`/stocks/${code}/volatility?window=${window}`),
     enabled: !!code,
+  });
+
+export const useScreeningYears = () =>
+  useQuery({ queryKey: ["screeningYears"], queryFn: () => get<number[]>("/screening/years") });
+
+export const useScreening = (year: number | null) =>
+  useQuery({
+    queryKey: ["screening", year],
+    queryFn: () => get<ScreeningRow[]>(`/screening/${year}`),
+    enabled: year != null,
+  });
+
+export const useScreeningChart = (year: number | null, code: string | null) =>
+  useQuery({
+    queryKey: ["screeningChart", year, code],
+    queryFn: () => get<ScreeningChart>(`/screening/${year}/${code}/chart`),
+    enabled: year != null && !!code,
   });
 
 export const useMaDuration = () =>

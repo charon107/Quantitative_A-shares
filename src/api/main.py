@@ -16,7 +16,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from src.api.routes import analytics, export, market, rankings, stocks
+from src.api.routes import analytics, export, market, rankings, screening, stocks
 
 DIST_DIR = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 
@@ -35,6 +35,7 @@ app.add_middleware(
 app.include_router(market.router, prefix="/api")
 app.include_router(stocks.router, prefix="/api")
 app.include_router(rankings.router, prefix="/api")
+app.include_router(screening.router, prefix="/api")
 app.include_router(analytics.router, prefix="/api")
 app.include_router(export.router, prefix="/api")
 
