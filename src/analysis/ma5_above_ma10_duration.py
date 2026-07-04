@@ -24,6 +24,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from src import config
+
 # 注意：matplotlib 仅在 plot_histogram() 内惰性导入，
 # 这样看板等只需 compute_duration_samples 的调用方 import 本模块时不会拉起 matplotlib。
 
@@ -34,7 +36,7 @@ import pandas as pd
 DATA_DIR = "股价数据_parquet_fq"
 KLINE_SUBDIR = "kline_fq"
 
-START_DATE = "2025-01-01"   # 只计入上穿日 >= 此日期的样本
+START_DATE = config.START_DATE   # 只计入上穿日 >= 此日期的样本
 MA_SHORT = 5
 MA_LONG = 20
 

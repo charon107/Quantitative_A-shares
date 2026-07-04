@@ -76,6 +76,19 @@ free -h        # 确认内存正常（DuckDB 查询期 < memory_limit）
 ufw allow 8501       # 或 iptables 放行 8501
 ```
 
+## 备份与恢复
+
+- **本地滚动备份（自动）**：每次入库 `atomic_swap` 前，旧库自动 rename 进库文件同目录的
+  `backups/`（`market-*.duckdb` 每日保留 3 份 + `weekly-*.duckdb` 周备份保留 4 份，
+  `BACKUP_KEEP_DAILY`/`BACKUP_KEEP_WEEKLY` 可调）。误操作后直接把对应备份文件
+  拷回 `market.duckdb` 并重启 api 即可回滚。
+- **异地备份（每周）**：`.github/workflows/db_backup.yml` 每周把全表 zstd parquet 快照
+  上传到 Hugging Face 私有 dataset（需 secrets `HF_TOKEN` + `HF_BACKUP_REPO`），保留 8 份。
+- **从快照恢复**：下载某个 `snapshots/YYYY-MM-DD/` 目录到服务器后：
+  `DUCKDB_PATH=... uv run python scripts/restore_from_backup.py <目录>`（自动校验 manifest 行数）。
+- **schema 迁移**：`scripts/migrate_schema_v2.py`（幂等，版本号存 `meta_kv`）；
+  迁移前后用 `scripts/db_size_report.py` 对比体积。
+
 ## 备注
 
 - DuckDB 并发：API 用只读短连接；入库 `refresh_data` 写临时库后原子替换，避免争锁。

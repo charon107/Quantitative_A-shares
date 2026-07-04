@@ -8,8 +8,7 @@ from __future__ import annotations
 import pandas as pd
 
 from src import cache, metrics
-
-DEFAULT_START = "2025-01-01"
+from src.config import START_DATE as DEFAULT_START
 
 
 def latest_day() -> pd.DataFrame:

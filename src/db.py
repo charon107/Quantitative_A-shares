@@ -25,10 +25,13 @@ DUCKDB_PATH = os.environ.get("DUCKDB_PATH", "market.duckdb")
 MEMORY_LIMIT = os.environ.get("DUCKDB_MEMORY_LIMIT", "400MB")
 THREADS = int(os.environ.get("DUCKDB_THREADS", "2"))
 
-# kline 表的规范列顺序（与 tushare_client.compute_qfq 产出一致）
+# 当前 schema 版本（存 meta_kv；迁移脚本据此判断是否需要迁移）
+SCHEMA_VERSION = 2
+
+# kline 表的规范列顺序（compute_qfq 产出的多余列如 adjustflag 在 upsert 时被忽略）
 KLINE_COLUMNS = [
     "code", "date", "open", "high", "low", "close",
-    "volume", "amount", "pctChg", "turn", "adjustflag",
+    "volume", "amount", "pctChg", "turn",
 ]
 # 原始未复权日线（入库内部，用于分红后重算前复权）
 RAW_COLUMNS = [
@@ -56,6 +59,13 @@ FUNDAMENTAL_COLUMNS = [
 SELECTED_COLUMNS = ["year", "code", "code_name"]
 
 SCHEMA_SQL = """
+-- 元信息键值表（schema_version 等）
+CREATE TABLE IF NOT EXISTS meta_kv (
+    key   VARCHAR PRIMARY KEY,
+    value VARCHAR
+);
+
+-- pctChg/turn 用 FLOAT：展示精度 2 位小数，7 位有效数字足够；OHLC/量额保持 DOUBLE
 CREATE TABLE IF NOT EXISTS kline (
     code       VARCHAR NOT NULL,
     date       DATE    NOT NULL,
@@ -65,9 +75,8 @@ CREATE TABLE IF NOT EXISTS kline (
     close      DOUBLE,
     volume     DOUBLE,
     amount     DOUBLE,
-    pctChg     DOUBLE,
-    turn       DOUBLE,
-    adjustflag VARCHAR,
+    pctChg     FLOAT,
+    turn       FLOAT,
     PRIMARY KEY (code, date)
 );
 CREATE INDEX IF NOT EXISTS idx_kline_date ON kline(date);
@@ -82,7 +91,7 @@ CREATE TABLE IF NOT EXISTS raw_kline (
     code   VARCHAR NOT NULL,
     date   DATE    NOT NULL,
     open   DOUBLE, high DOUBLE, low DOUBLE, close DOUBLE,
-    volume DOUBLE, amount DOUBLE, pctChg DOUBLE, turn DOUBLE,
+    volume DOUBLE, amount DOUBLE, pctChg FLOAT, turn FLOAT,
     PRIMARY KEY (code, date)
 );
 
@@ -133,13 +142,14 @@ CREATE TABLE IF NOT EXISTS ths_hot (
 );
 
 -- 基本面财务（年报口径；roe/netprofit_yoy/debt_to_assets 已在采集层 ÷100 转小数）
+-- 比率列 FLOAT 足够（展示 0.01%）；net_profit/cfo 是元级绝对金额，保持 DOUBLE
 CREATE TABLE IF NOT EXISTS stock_fundamental (
     code           VARCHAR NOT NULL,
     year           INTEGER NOT NULL,
     ann_date       VARCHAR,
-    roe            DOUBLE,
-    netprofit_yoy  DOUBLE,
-    debt_to_assets DOUBLE,
+    roe            FLOAT,
+    netprofit_yoy  FLOAT,
+    debt_to_assets FLOAT,
     net_profit     DOUBLE,
     cfo            DOUBLE,
     PRIMARY KEY (code, year)
@@ -427,7 +437,35 @@ def purge_delisted(conn: duckdb.DuckDBPyConnection, extra_codes=None) -> int:
     return delete_codes(codes, conn)
 
 
+def get_meta(key: str, conn: duckdb.DuckDBPyConnection) -> str | None:
+    """读 meta_kv 中的一个键（表不存在或无此键返回 None）。"""
+    try:
+        row = conn.execute("SELECT value FROM meta_kv WHERE key = ?", [key]).fetchone()
+    except duckdb.Error:
+        return None
+    return row[0] if row else None
+
+
+def set_meta(key: str, value: str, conn: duckdb.DuckDBPyConnection) -> None:
+    """写 meta_kv 中的一个键。"""
+    conn.execute("INSERT OR REPLACE INTO meta_kv (key, value) VALUES (?, ?)", [key, str(value)])
+
+
 def atomic_swap(tmp_path: str, dest_path: str | None = None) -> None:
-    """把临时库文件原子替换到正式路径（同盘 os.replace 原子）。"""
+    """把临时库文件原子替换到正式路径（同盘 os.replace 原子）。
+
+    替换前把旧库 rename（零拷贝）到 backups/ 目录留作恢复点，并做滚动轮转
+    （最近 N 份每日 + 周备份）。备份失败不阻塞入库，仅打印警告后直接替换。
+    """
     dest = dest_path or DUCKDB_PATH
+    from src import backup
+
+    try:
+        backup.snapshot_before_swap(dest)
+    except OSError as e:
+        print(f"[db] 旧库备份失败（不影响入库）：{e}")
     os.replace(tmp_path, dest)
+    try:
+        backup.rotate_backups(dest)
+    except OSError as e:
+        print(f"[db] 备份轮转失败（不影响入库）：{e}")

@@ -10,7 +10,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from src import db
+from src import config, db
 from src.analysis.ma5_above_ma10_duration import (
     add_ma,
     extract_samples,
@@ -67,7 +67,7 @@ def _equal_weighted_index_sql(code_filter: str = "") -> str:
     """
 
 
-def equal_weighted_index(start_date: str = "2025-01-01", path: str | None = None) -> pd.Series:
+def equal_weighted_index(start_date: str = config.START_DATE, path: str | None = None) -> pd.Series:
     """等权组合累计收益（全市场主版）。index=日期，value=累计收益率。"""
     daily = db.query_df(_equal_weighted_index_sql(), [start_date], path=path)
     if daily.empty:
@@ -76,7 +76,7 @@ def equal_weighted_index(start_date: str = "2025-01-01", path: str | None = None
     return (1 + s).cumprod() - 1
 
 
-def shanghai_equal_weighted_index(start_date: str = "2025-01-01", path: str | None = None) -> pd.Series:
+def shanghai_equal_weighted_index(start_date: str = config.START_DATE, path: str | None = None) -> pd.Series:
     """上证主板等权组合累计收益（仅 sh.60xxxx）。"""
     daily = db.query_df(_equal_weighted_index_sql("WHERE code LIKE 'sh.6%'"), [start_date], path=path)
     if daily.empty:

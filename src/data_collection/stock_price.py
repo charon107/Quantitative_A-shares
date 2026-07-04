@@ -28,11 +28,11 @@ try:
 except ImportError:  # 直接以脚本路径运行时，兄弟模块在 sys.path[0]
     import tushare_client as tsc
 from src import db
+from src.config import START_DATE  # 拉取起始日期（KLINE_START_DATE 可覆盖）
 
 # =========================
 # 配置
 # =========================
-START_DATE = "2025-01-01"  # 拉取起始日期
 STATE_PATH = os.environ.get("INGEST_STATE_PATH", "ingest_state.json")
 
 # 永久性错误（token失效/权限不足/积分不够）熔断后的冷却时长（小时）

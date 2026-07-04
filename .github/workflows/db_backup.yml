@@ -1,0 +1,64 @@
+name: DB 异地备份到 Hugging Face
+
+# 每周一次：服务器导出 zstd parquet 快照 -> runner scp 拉回 -> 上传 HF 私有 dataset。
+# 服务器直连 HF 不稳，所以由 runner 中转（与 ingest 的 runner 抓取架构同构）。
+# 需 secrets：SERVER_HOST/SERVER_USER/SERVER_PASSWORD(/SERVER_PORT)、HF_TOKEN、HF_BACKUP_REPO。
+on:
+  schedule:
+    - cron: "41 18 * * 6"   # 周六 18:41 UTC ≈ 北京周日 02:41
+  workflow_dispatch: {}
+
+concurrency:
+  group: db-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+
+      - name: 服务器导出 parquet 快照
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          command_timeout: 30m
+          script: |
+            set -e
+            cd /root/Quantitative_A-shares/WechatNum
+            export PATH="/root/.local/bin:$PATH"
+            export DUCKDB_PATH=/root/Quantitative_A-shares/WechatNum/market.duckdb
+            rm -rf /tmp/db_export
+            uv run python deploy/export_backup.py /tmp/db_export
+
+      - name: 拉回快照到 runner
+        env:
+          SSHPASS: ${{ secrets.SERVER_PASSWORD }}
+        run: |
+          sudo apt-get install -y -q sshpass
+          sshpass -e scp -o StrictHostKeyChecking=no -P "${{ secrets.SERVER_PORT || 22 }}" \
+            -r "${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/tmp/db_export" ./db_export
+          ls -lh db_export/
+
+      - name: 上传 Hugging Face 并轮转
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_BACKUP_REPO: ${{ secrets.HF_BACKUP_REPO }}
+        run: |
+          uv run --no-project --with huggingface_hub \
+            python scripts/hf_upload_backup.py db_export
+
+      - name: 清理服务器临时目录
+        if: always()
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          script: rm -rf /tmp/db_export
