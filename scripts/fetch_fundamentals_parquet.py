@@ -20,8 +20,15 @@ import argparse
 import os
 import re
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pandas as pd
+
+try:
+    from tqdm import tqdm
+except ImportError:  # runner 环境未装 tqdm 时退化为普通循环
+    tqdm = None
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
@@ -31,6 +38,17 @@ from src.data_collection import tushare_client as tsc  # noqa: E402
 
 _MB = re.compile(r"^(sh\.60|sz\.00)\d{4}$")
 INDEX_CODE = "sh.000001"
+
+# 并发线程数：只用于隐藏网络往返延迟，总速率由 tushare_client 的全局限速器
+# 钉死在 MAX_CALLS_PER_MIN*0.9（默认 90 次/分），并发数再大也不会超限频。
+WORKERS = int(os.environ.get("FETCH_FUND_WORKERS", "8"))
+
+
+class _NextAllowed:
+    """threading 版的 next_allowed 状态（鸭子类型兼容 multiprocessing.Value 的 .value）。"""
+
+    def __init__(self) -> None:
+        self.value = 0.0
 
 
 def _mainboard_codes() -> list[str]:
@@ -66,17 +84,48 @@ def main() -> None:
     total = len(codes)
     print(f"[fetch_fund] 主板股票 {total} 只")
 
-    frames: list[pd.DataFrame] = []
-    for i, code in enumerate(codes, 1):
-        try:
-            df = _fetch_one(code)
-            if not df.empty:
-                frames.append(df)
-        except Exception as e:  # 单只失败不致命，跳过继续
-            print(f"[fetch_fund] {code} 失败：{e}")
-        if i % 200 == 0:
-            print(f"[fetch_fund] 进度 {i}/{total}")
+    # 逐股落盘到 parts/，进程中断后重跑可跳过已抓的（断点续传）
+    parts_dir = os.path.join(od, "parts")
+    os.makedirs(parts_dir, exist_ok=True)
+    done = {fn[:-8] for fn in os.listdir(parts_dir) if fn.endswith(".parquet")}
+    if done:
+        print(f"[fetch_fund] 续传：已有 {len(done)} 只，跳过")
 
+    # 全局限速器：所有线程共享同一个"下一次允许调用"时间戳，总速率恒为 90 次/分
+    tsc.configure_rate_limiter(threading.Lock(), _NextAllowed())
+
+    def _fetch_and_save(code: str) -> None:
+        df = _fetch_one(code)
+        # 空结果也占位，避免重跑时反复请求无数据的股票
+        out = df if not df.empty else pd.DataFrame()
+        out.to_parquet(os.path.join(parts_dir, f"{code}.parquet"), index=False)
+
+    todo = [c for c in codes if c not in done]
+    print(f"[fetch_fund] 并发 {WORKERS} 线程，全局限速 {tsc.MAX_CALLS_PER_MIN * 0.9:.0f} 次/分")
+    bar = tqdm(total=len(todo), desc="[fetch_fund] 抓取", unit="只") if tqdm else None
+    n_done = 0
+    with ThreadPoolExecutor(max_workers=WORKERS) as ex:
+        futures = {ex.submit(_fetch_and_save, c): c for c in todo}
+        for fut in as_completed(futures):
+            code = futures[fut]
+            try:
+                fut.result()
+            except Exception as e:  # 单只失败不致命，跳过继续
+                print(f"[fetch_fund] {code} 失败：{e}")
+            n_done += 1
+            if bar:
+                bar.update(1)
+            elif n_done % 100 == 0:
+                print(f"[fetch_fund] 进度 {n_done}/{len(todo)}")
+    if bar:
+        bar.close()
+
+    frames = []
+    for fn in sorted(os.listdir(parts_dir)):
+        if fn.endswith(".parquet"):
+            part = pd.read_parquet(os.path.join(parts_dir, fn))
+            if not part.empty:
+                frames.append(part)
     fund = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(
         columns=["code", "year", "ann_date", "roe", "netprofit_yoy", "debt_to_assets", "net_profit", "cfo"]
     )

@@ -31,27 +31,31 @@ export function Screening({ onOpenStock }: { onOpenStock: (code: string) => void
         <CardHeader
           title="基本面选股"
           subtitle="逐年回测池 · 近5年 ROE≥15% / 净利增速≥10% / 净利CAGR≥15% / 负债率<50% / 现金流达标"
-          right={
-            years.data && years.data.length > 0 ? (
-              <div className="inline-flex flex-wrap gap-0.5 rounded-lg border border-line bg-panel2 p-0.5">
-                {years.data.map((y) => (
-                  <button
-                    key={y}
-                    onClick={() => {
-                      setYear(y);
-                      setPicked(null);
-                    }}
-                    className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
-                      year === y ? "bg-panel text-clay shadow-soft" : "text-muted hover:text-ink"
-                    }`}
-                  >
-                    {y}
-                  </button>
-                ))}
-              </div>
-            ) : null
-          }
         />
+        {years.data && years.data.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 border-b border-line/60 px-5 pb-3">
+            <span className="text-xs text-muted">选股年份</span>
+            <div className="flex flex-wrap gap-1 rounded-lg border border-line bg-panel2 p-1">
+              {years.data.map((y) => (
+                <button
+                  key={y}
+                  onClick={() => {
+                    setYear(y);
+                    setPicked(null);
+                  }}
+                  aria-pressed={year === y}
+                  className={`min-w-[3.25rem] rounded-md px-3 py-1.5 text-sm font-medium transition ${
+                    year === y
+                      ? "bg-panel text-clay shadow-soft ring-1 ring-line"
+                      : "text-muted hover:bg-panel/60 hover:text-ink"
+                  }`}
+                >
+                  {y}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         <div className="px-2 pb-4">
           {years.isLoading || list.isLoading ? (
             <Loading />

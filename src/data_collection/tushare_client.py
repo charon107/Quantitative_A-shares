@@ -14,8 +14,26 @@ import random
 import pandas as pd
 import tushare as ts
 
+
+def _load_dotenv() -> None:
+    """把仓库根目录 .env 里的键值补进环境变量（已设置的环境变量优先，不覆盖）。"""
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    path = os.path.join(root, ".env")
+    if not os.path.exists(path):
+        return
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            os.environ.setdefault(k.strip(), v.strip())
+
+
+_load_dotenv()
+
 # 个人 tushare token（去 tushare.pro 注册获取，或第三方代理分配的 token），
-# 由调用方自行配置环境变量
+# 由调用方自行配置环境变量（或放在仓库根目录 .env，已 gitignore）
 TUSHARE_TOKEN = os.environ.get("TUSHARE_TOKEN", "")
 
 # 第三方代理的 API 地址（留空则用 tushare 官方默认地址 http://api.tushare.pro）。
@@ -147,14 +165,15 @@ def _call_with_retry(label: str, fn, *args, **kwargs):
 
 def fetch_stock_basic() -> pd.DataFrame:
     """获取全市场上市股票列表，返回 code（sh.600000 风格）/ code_name 两列。"""
-    df = _call_with_retry(
-        "fetch_stock_basic",
-        _pro().stock_basic,
-        exchange="", list_status="L",
-        fields="ts_code,symbol,name",
-    )
-    if df is None or df.empty:
-        raise RuntimeError("stock_basic returned empty DataFrame.")
+
+    def _fetch_nonempty():
+        # 网关抖动时可能返回空结果而非报错，空也视为失败进入重试
+        df = _pro().stock_basic(exchange="", list_status="L", fields="ts_code,symbol,name")
+        if df is None or df.empty:
+            raise RuntimeError("stock_basic returned empty DataFrame.")
+        return df
+
+    df = _call_with_retry("fetch_stock_basic", _fetch_nonempty)
     df = df.copy()
     df["code"] = df["ts_code"].apply(_from_ts_code)
     df = df.rename(columns={"name": "code_name"})
