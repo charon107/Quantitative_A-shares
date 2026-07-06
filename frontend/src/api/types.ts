@@ -154,7 +154,7 @@ export interface ScreeningRow {
   code_name: string | null;
   roe: number | null;
   netprofit_yoy: number | null;
-  debt_to_assets: number | null;
+  debt_ratio: number | null;
   net_profit: number | null;
 }
 

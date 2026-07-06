@@ -20,7 +20,7 @@ def duck_fund(duck):
         "ann_date": [f"{y + 1}-04-15" for y in years],
         "roe": [0.30] * 5,
         "netprofit_yoy": [0.20] * 5,
-        "debt_to_assets": [0.30] * 5,
+        "debt_ratio": [0.30] * 5,
         "net_profit": [100, 120, 150, 180, 210],
         "cfo": [90, 110, 140, 170, 200],
     })
@@ -54,6 +54,7 @@ def test_screening_by_year(duck_fund):
     assert row["code"] == "sh.600519"
     assert row["code_name"] == "贵州茅台"
     assert row["roe"] == pytest.approx(0.30)  # 2024 年（窗口末年）指标
+    assert row["debt_ratio"] == pytest.approx(0.30)
 
 
 def test_screening_chart(duck_fund):

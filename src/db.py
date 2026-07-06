@@ -50,10 +50,11 @@ HOT_COLUMNS = [
     "code", "code_name", "rank_no", "current_price", "pct_change",
     "hot", "concept", "rank_reason", "trade_date",
 ]
-# 基本面财务（年报口径，来自 tushare fina_indicator + income + cashflow）
+# 基本面财务（年报口径，来自 tushare fina_indicator + income + cashflow + balancesheet；
+# debt_ratio = 总债务(短期借款+长期借款+应付债券)/总资产，策略条件3 的有息负债口径）
 FUNDAMENTAL_COLUMNS = [
     "code", "year", "ann_date", "roe", "netprofit_yoy",
-    "debt_to_assets", "net_profit", "cfo",
+    "debt_ratio", "net_profit", "cfo",
 ]
 # 逐年回测选股池（来自 fundamental_screen.run_selection）
 SELECTED_COLUMNS = ["year", "code", "code_name"]
@@ -141,7 +142,8 @@ CREATE TABLE IF NOT EXISTS ths_hot (
     trade_date    VARCHAR
 );
 
--- 基本面财务（年报口径；roe/netprofit_yoy/debt_to_assets 已在采集层 ÷100 转小数）
+-- 基本面财务（年报口径；roe/netprofit_yoy 已在采集层归一为小数；
+-- debt_ratio = 总债务(短借+长借+应付债券)/总资产，策略条件3 的有息负债口径）
 -- 比率列 FLOAT 足够（展示 0.01%）；net_profit/cfo 是元级绝对金额，保持 DOUBLE
 CREATE TABLE IF NOT EXISTS stock_fundamental (
     code           VARCHAR NOT NULL,
@@ -149,7 +151,7 @@ CREATE TABLE IF NOT EXISTS stock_fundamental (
     ann_date       VARCHAR,
     roe            FLOAT,
     netprofit_yoy  FLOAT,
-    debt_to_assets FLOAT,
+    debt_ratio     FLOAT,
     net_profit     DOUBLE,
     cfo            DOUBLE,
     PRIMARY KEY (code, year)
@@ -344,6 +346,20 @@ def upsert_ths_hot(df: pd.DataFrame, conn: duckdb.DuckDBPyConnection) -> int:
     )
     conn.unregister("_hot_in")
     return len(frame)
+
+
+def ensure_fundamental_schema(conn: duckdb.DuckDBPyConnection) -> bool:
+    """stock_fundamental 若还是旧结构（debt_to_assets 列 = 总负债口径）则整表重建。
+
+    该表每次基本面刷新都由全量 parquet 重写，DROP+重建比列改名干净——避免旧口径
+    数值残留在新列名下。返回是否发生了重建。调用前需先 init_schema 保证表存在。
+    """
+    cols = {r[1] for r in conn.execute("PRAGMA table_info('stock_fundamental')").fetchall()}
+    if "debt_ratio" in cols:
+        return False
+    conn.execute("DROP TABLE stock_fundamental")
+    init_schema(conn)
+    return True
 
 
 def upsert_fundamental(df: pd.DataFrame, conn: duckdb.DuckDBPyConnection) -> int:

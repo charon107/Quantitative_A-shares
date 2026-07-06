@@ -307,13 +307,13 @@ def selection_years(path: str | None = None) -> list[int]:
 def selected_stocks_by_year(year: int, path: str | None = None) -> pd.DataFrame:
     """某年选出的股票池，带上该股选股窗口末年(year-1)的展示财务指标。
 
-    列：code / code_name / roe / netprofit_yoy / debt_to_assets / net_profit。
+    列：code / code_name / roe / netprofit_yoy / debt_ratio / net_profit。
     """
     try:
         return db.query_df(
             """
             SELECT s.code, s.code_name,
-                   f.roe, f.netprofit_yoy, f.debt_to_assets, f.net_profit
+                   f.roe, f.netprofit_yoy, f.debt_ratio, f.net_profit
             FROM selected_stocks s
             LEFT JOIN stock_fundamental f
               ON s.code = f.code AND f.year = ? - 1

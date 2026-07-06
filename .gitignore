@@ -11,7 +11,7 @@ __pycache__/
 ingest_state.json
 
 # ===== 数据目录（本地大文件，不入库）=====
-artifacts_fund/
+artifacts_fund*/
 backups/
 股价数据_parquet_fq/
 ma5_ma10_duration_out/

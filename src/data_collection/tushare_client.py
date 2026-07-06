@@ -479,51 +479,56 @@ def _ann_date_iso(s: pd.Series) -> pd.Series:
 def fetch_fina_indicator(code: str) -> pd.DataFrame:
     """单只股票的财务指标（年报口径），一次请求拿全部报告期。
 
-    tushare fina_indicator 的 roe/netprofit_yoy/debt_to_assets 是百分数（15.0），
-    这里统一 ÷100 转小数，与旧 baostock 口径（0.15）一致，让下游选股阈值常量不必改。
+    tushare fina_indicator 的 roe/netprofit_yoy 是百分数（15.0），这里统一 ÷100 转小数，
+    让下游选股阈值常量（0.15 风格）不必改。
 
-    返回列：code/year/ann_date/roe/netprofit_yoy/debt_to_assets（仅年报行）。
+    注意：本项目所用代理的 fina_indicator 数据缺失 2006-2011 整段（income/cashflow/
+    balancesheet 全历史齐全），缺失年份由 assemble_annual_fundamental 用三大报表推算补齐。
+
+    返回列：code/year/ann_date/roe/netprofit_yoy（仅年报行）。
     """
     ts_code = _to_ts_code(code)
     df = _call_with_retry(
         f"fetch_fina_indicator({code})",
         _pro().fina_indicator,
         ts_code=ts_code,
-        fields="ann_date,end_date,roe,netprofit_yoy,debt_to_assets",
+        fields="ann_date,end_date,roe,netprofit_yoy",
     )
     if df is None or df.empty:
-        return pd.DataFrame(columns=["code", "year", "ann_date", "roe", "netprofit_yoy", "debt_to_assets"])
+        return pd.DataFrame(columns=["code", "year", "ann_date", "roe", "netprofit_yoy"])
     df = df.copy()
     df["year"] = _year_from_end_date(df["end_date"])
     df = df.dropna(subset=["year"])
     df["ann_date"] = _ann_date_iso(df["ann_date"])
-    for c in ("roe", "netprofit_yoy", "debt_to_assets"):
+    for c in ("roe", "netprofit_yoy"):
         df[c] = pd.to_numeric(df.get(c), errors="coerce") / 100.0
     df["code"] = code
-    df = df.sort_values("year").drop_duplicates("year", keep="last")
-    return df[["code", "year", "ann_date", "roe", "netprofit_yoy", "debt_to_assets"]].reset_index(drop=True)
+    # 同一报告期可能有原始/更新多行，按公告日排序后保留最新一次
+    df = df.sort_values(["year", "ann_date"]).drop_duplicates("year", keep="last")
+    return df[["code", "year", "ann_date", "roe", "netprofit_yoy"]].reset_index(drop=True)
 
 
 def fetch_income(code: str) -> pd.DataFrame:
-    """单只股票的利润表（年报口径）净利润。返回 code/year/net_profit（归母优先，退回 n_income）。"""
+    """单只股票的利润表（年报口径）净利润。返回 code/year/ann_date/net_profit（归母优先，退回 n_income）。"""
     ts_code = _to_ts_code(code)
     df = _call_with_retry(
         f"fetch_income({code})",
         _pro().income,
         ts_code=ts_code,
-        fields="end_date,n_income,n_income_attr_p",
+        fields="ann_date,end_date,n_income,n_income_attr_p",
     )
     if df is None or df.empty:
-        return pd.DataFrame(columns=["code", "year", "net_profit"])
+        return pd.DataFrame(columns=["code", "year", "ann_date", "net_profit"])
     df = df.copy()
     df["year"] = _year_from_end_date(df["end_date"])
     df = df.dropna(subset=["year"])
+    df["ann_date"] = _ann_date_iso(df["ann_date"])
     attr = pd.to_numeric(df.get("n_income_attr_p"), errors="coerce")
     total = pd.to_numeric(df.get("n_income"), errors="coerce")
     df["net_profit"] = attr.fillna(total)
     df["code"] = code
-    df = df.sort_values("year").drop_duplicates("year", keep="last")
-    return df[["code", "year", "net_profit"]].reset_index(drop=True)
+    df = df.sort_values(["year", "ann_date"]).drop_duplicates("year", keep="last")
+    return df[["code", "year", "ann_date", "net_profit"]].reset_index(drop=True)
 
 
 def fetch_cashflow(code: str) -> pd.DataFrame:
@@ -544,6 +549,112 @@ def fetch_cashflow(code: str) -> pd.DataFrame:
     df["code"] = code
     df = df.sort_values("year").drop_duplicates("year", keep="last")
     return df[["code", "year", "cfo"]].reset_index(drop=True)
+
+
+def fetch_balancesheet(code: str) -> pd.DataFrame:
+    """单只股票的资产负债表（年报口径）。
+
+    返回列：code/year/st_borr/lt_borr/bond_payable/total_assets/equity。
+    st_borr/lt_borr/bond_payable 用于算总债务（策略条件3 的有息负债口径），
+    equity（归母净资产 total_hldr_eqy_exc_min_int）用于推算平均净资产 ROE。
+    """
+    ts_code = _to_ts_code(code)
+    df = _call_with_retry(
+        f"fetch_balancesheet({code})",
+        _pro().balancesheet,
+        ts_code=ts_code,
+        fields="ann_date,end_date,st_borr,lt_borr,bond_payable,total_assets,total_hldr_eqy_exc_min_int",
+    )
+    cols = ["code", "year", "st_borr", "lt_borr", "bond_payable", "total_assets", "equity"]
+    if df is None or df.empty:
+        return pd.DataFrame(columns=cols)
+    df = df.copy()
+    df["year"] = _year_from_end_date(df["end_date"])
+    df = df.dropna(subset=["year"])
+    df["ann_date"] = _ann_date_iso(df["ann_date"])
+    df = df.rename(columns={"total_hldr_eqy_exc_min_int": "equity"})
+    for c in ("st_borr", "lt_borr", "bond_payable", "total_assets", "equity"):
+        df[c] = pd.to_numeric(df.get(c), errors="coerce")
+    df["code"] = code
+    df = df.sort_values(["year", "ann_date"]).drop_duplicates("year", keep="last")
+    return df[cols].reset_index(drop=True)
+
+
+# assemble_annual_fundamental 产出的指标列（与 db.FUNDAMENTAL_COLUMNS 的指标部分一致）
+METRIC_COLUMNS = ("roe", "netprofit_yoy", "debt_ratio", "net_profit", "cfo")
+
+
+def assemble_annual_fundamental(
+    code: str,
+    fina: pd.DataFrame,
+    inc: pd.DataFrame,
+    cf: pd.DataFrame,
+    bal: pd.DataFrame,
+) -> pd.DataFrame:
+    """把单只股票四个接口的年报数据拼成选股面板行（按 year 外连接）。
+
+    指标口径（对应策略规格的三条件）：
+      roe            条件1：优先取 fina_indicator.roe；缺失年份用
+                     归母净利润 / 平均归母净资产 推算（tushare roe 即平均口径，
+                     经 2012+ 重叠年份校准两者误差在千分位内）。
+      netprofit_yoy  条件2：优先取 fina_indicator.netprofit_yoy；缺失年份用
+                     (净利润 - 上年净利润) / |上年净利润| 推算（要求年份连续）。
+      debt_ratio     条件3：总债务(短期借款+长期借款+应付债券)/总资产，
+                     全部年份由资产负债表计算（缺项视为 0，无资产负债表行则为 NaN）。
+
+    fina 缺失年份需要推算，是因为代理的 fina_indicator 缺 2006-2011 整段，
+    而三大报表全历史齐全（见 fetch_fina_indicator 注）。
+
+    返回列：code/year/ann_date/roe/netprofit_yoy/debt_ratio/net_profit/cfo。
+    """
+    out_cols = ["code", "year", "ann_date", *METRIC_COLUMNS]
+
+    def _prep(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
+        if df is None or df.empty:
+            return pd.DataFrame(columns=["year", *cols])
+        return df[["year", *cols]].copy()
+
+    f = _prep(fina, ["ann_date", "roe", "netprofit_yoy"])
+    i = _prep(inc, ["ann_date", "net_profit"]).rename(columns={"ann_date": "ann_date_inc"})
+    c = _prep(cf, ["cfo"])
+    b = _prep(bal, ["st_borr", "lt_borr", "bond_payable", "total_assets", "equity"])
+
+    df = (
+        f.merge(i, on="year", how="outer")
+        .merge(c, on="year", how="outer")
+        .merge(b, on="year", how="outer")
+    )
+    if df.empty:
+        return pd.DataFrame(columns=out_cols)
+    df["year"] = pd.to_numeric(df["year"], errors="coerce")
+    df = df.dropna(subset=["year"])
+    df["year"] = df["year"].astype(int)
+    df = df.sort_values("year").reset_index(drop=True)
+    if "ann_date" not in df.columns:
+        df["ann_date"] = pd.NA
+    if "ann_date_inc" not in df.columns:
+        df["ann_date_inc"] = pd.NA
+
+    # 上一年的值只在年份连续时可用（yoy 与平均净资产都依赖上年）
+    consecutive = df["year"].diff().eq(1)
+    np_prev = df["net_profit"].shift(1).where(consecutive)
+    eq_prev = df["equity"].shift(1).where(consecutive)
+
+    total_debt = (
+        df["st_borr"].fillna(0.0) + df["lt_borr"].fillna(0.0) + df["bond_payable"].fillna(0.0)
+    )
+    df["debt_ratio"] = total_debt / df["total_assets"].where(df["total_assets"] > 0)
+
+    yoy_calc = (df["net_profit"] - np_prev) / np_prev.abs().where(np_prev != 0)
+    df["netprofit_yoy"] = df["netprofit_yoy"].fillna(yoy_calc)
+
+    avg_eq = (df["equity"] + eq_prev) / 2
+    df["roe"] = df["roe"].fillna(df["net_profit"] / avg_eq.where(avg_eq > 0))
+
+    df["ann_date"] = df["ann_date"].fillna(df["ann_date_inc"])
+    df["code"] = code
+    df = df.dropna(subset=list(METRIC_COLUMNS), how="all")
+    return df[out_cols].reset_index(drop=True)
 
 
 def fetch_index_daily(index_code: str = "sh.000001", start_date: str = "", end_date: str = "") -> pd.DataFrame:

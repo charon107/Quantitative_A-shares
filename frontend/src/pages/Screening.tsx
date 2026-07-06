@@ -4,7 +4,7 @@ import { Card, CardHeader } from "../components/Card";
 import { ErrorState, Loading } from "../components/States";
 import { ScreeningChart } from "../charts/ScreeningChart";
 
-/** 小数比率 -> 百分比字符串（roe/净利增速/资产负债率后端已 ÷100 存小数）。 */
+/** 小数比率 -> 百分比字符串（roe/净利增速/总债务比后端已归一为小数）。 */
 const pct = (v: number | null) => (v == null ? "—" : `${(v * 100).toFixed(2)}%`);
 /** 净利润：元 -> 亿。 */
 const yi = (v: number | null) => (v == null ? "—" : `${(v / 1e8).toFixed(2)} 亿`);
@@ -30,7 +30,7 @@ export function Screening({ onOpenStock }: { onOpenStock: (code: string) => void
       <Card>
         <CardHeader
           title="基本面选股"
-          subtitle="逐年回测池 · 近5年 ROE≥15% / 净利增速≥10% / 净利CAGR≥15% / 负债率<50% / 现金流达标"
+          subtitle="逐年回测池 · 近5年 ROE≥15%(最低≥10%) / 净利增速≥10% / 净利CAGR≥15% / 总债务/总资产<50% · 剔除银行股"
         />
         {years.data && years.data.length > 0 && (
           <div className="flex flex-wrap items-center gap-2 border-b border-line/60 px-5 pb-3">
@@ -73,7 +73,7 @@ export function Screening({ onOpenStock }: { onOpenStock: (code: string) => void
                     <th className="px-3 py-2 font-medium">代码</th>
                     <th className="px-3 py-2 text-right font-medium">ROE</th>
                     <th className="px-3 py-2 text-right font-medium">净利增速</th>
-                    <th className="px-3 py-2 text-right font-medium">资产负债率</th>
+                    <th className="px-3 py-2 text-right font-medium">总债务/总资产</th>
                     <th className="px-3 py-2 text-right font-medium">净利润</th>
                   </tr>
                 </thead>
@@ -102,7 +102,7 @@ export function Screening({ onOpenStock }: { onOpenStock: (code: string) => void
                       <td className="px-3 py-2 nums text-xs text-muted">{row.code}</td>
                       <td className="px-3 py-2 text-right nums">{pct(row.roe)}</td>
                       <td className="px-3 py-2 text-right nums">{pct(row.netprofit_yoy)}</td>
-                      <td className="px-3 py-2 text-right nums">{pct(row.debt_to_assets)}</td>
+                      <td className="px-3 py-2 text-right nums">{pct(row.debt_ratio)}</td>
                       <td className="px-3 py-2 text-right nums">{yi(row.net_profit)}</td>
                     </tr>
                   ))}

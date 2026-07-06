@@ -21,7 +21,8 @@ concurrency:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    # 每股 4 次调用（fina/income/cashflow/balancesheet），3200 只 @90次/分 ≈ 143 分钟
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -60,6 +61,8 @@ jobs:
             cd /root/Quantitative_A-shares/WechatNum
             export PATH="/root/.local/bin:$PATH"
             export DUCKDB_PATH=/root/Quantitative_A-shares/WechatNum/market.duckdb
+            # 先把服务器代码更新到与 runner 一致（load/选股逻辑随代码演进，旧代码跑新 parquet 会错位）
+            bash deploy/update.sh
             uv run python scripts/load_fundamentals.py /tmp/ingest_fund
             uv run python deploy/warmup_redis.py || true
             rm -rf /tmp/ingest_fund

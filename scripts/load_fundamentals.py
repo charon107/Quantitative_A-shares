@@ -43,6 +43,8 @@ def main() -> None:
     n_fund = n_idx = n_sel = purged = 0
     with db.connect(read_only=False, path=tmp) as conn:
         db.init_schema(conn)
+        if db.ensure_fundamental_schema(conn):
+            print("[load_fund] stock_fundamental 旧结构（debt_to_assets），已重建为 debt_ratio 口径")
         if not fund.empty:
             n_fund = db.upsert_fundamental(fund, conn)
         if not idx.empty:
@@ -52,7 +54,12 @@ def main() -> None:
         panel = fundamental_screen.panel_from_conn(conn)
         nm_df = conn.execute("SELECT code, code_name FROM stock_meta").df()
         nm = dict(zip(nm_df["code"], nm_df["code_name"])) if not nm_df.empty else {}
-        selected = fundamental_screen.select_pool(panel, nm)
+        li_df = conn.execute("SELECT code, list_date, industry FROM stock_info").df()
+        list_dates = dict(zip(li_df["code"], li_df["list_date"])) if not li_df.empty else {}
+        industries = dict(zip(li_df["code"], li_df["industry"])) if not li_df.empty else {}
+        selected = fundamental_screen.select_pool(
+            panel, nm, list_dates=list_dates, industries=industries
+        )
         n_sel = db.replace_selected_stocks(selected, conn)
 
         # 清理退市股（选股池/财务表也一并清）

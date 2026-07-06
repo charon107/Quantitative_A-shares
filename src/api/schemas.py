@@ -150,7 +150,7 @@ class ScreeningRow(BaseModel):
     code_name: str | None = None
     roe: float | None = None
     netprofit_yoy: float | None = None
-    debt_to_assets: float | None = None
+    debt_ratio: float | None = None
     net_profit: float | None = None
 
 

@@ -6,7 +6,8 @@
 
 产出（--outdir 下）：
   fundamental.parquet  全市场年报财务（code/year/ann_date/roe/netprofit_yoy/
-                       debt_to_assets/net_profit/cfo）
+                       debt_ratio/net_profit/cfo；debt_ratio=总债务/总资产，
+                       总债务=短期借款+长期借款+应付债券）
   index.parquet        指数日线收盘（默认上证综指 sh.000001；code/date/close）
 
 用法（runner）：
@@ -21,6 +22,7 @@ import os
 import re
 import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pandas as pd
@@ -58,14 +60,13 @@ def _mainboard_codes() -> list[str]:
 
 
 def _fetch_one(code: str) -> pd.DataFrame:
-    """拼装单只股票的年报财务宽表（fina_indicator + income + cashflow 按 year 合并）。"""
+    """拼装单只股票的年报财务宽表（fina/income/cashflow/balancesheet 四表按 year 外连接，
+    fina 缺失年份用报表推算，见 assemble_annual_fundamental）。"""
     fina = tsc.fetch_fina_indicator(code)
-    if fina.empty:
-        return pd.DataFrame()
     inc = tsc.fetch_income(code)
     cf = tsc.fetch_cashflow(code)
-    df = fina.merge(inc, on=["code", "year"], how="left").merge(cf, on=["code", "year"], how="left")
-    return df
+    bal = tsc.fetch_balancesheet(code)
+    return tsc.assemble_annual_fundamental(code, fina, inc, cf, bal)
 
 
 def main() -> None:
@@ -104,6 +105,7 @@ def main() -> None:
     print(f"[fetch_fund] 并发 {WORKERS} 线程，全局限速 {tsc.MAX_CALLS_PER_MIN * 0.9:.0f} 次/分")
     bar = tqdm(total=len(todo), desc="[fetch_fund] 抓取", unit="只") if tqdm else None
     n_done = 0
+    start_ts = time.time()
     with ThreadPoolExecutor(max_workers=WORKERS) as ex:
         futures = {ex.submit(_fetch_and_save, c): c for c in todo}
         for fut in as_completed(futures):
@@ -115,8 +117,14 @@ def main() -> None:
             n_done += 1
             if bar:
                 bar.update(1)
-            elif n_done % 100 == 0:
-                print(f"[fetch_fund] 进度 {n_done}/{len(todo)}")
+            elif n_done % 20 == 0 or n_done == len(todo):
+                rate = n_done / max(time.time() - start_ts, 1e-9)  # 只/秒
+                eta_min = (len(todo) - n_done) / max(rate, 1e-9) / 60
+                print(
+                    f"[fetch_fund] 进度 {n_done}/{len(todo)} "
+                    f"({n_done / len(todo):.1%})，预计剩余 {eta_min:.0f} 分钟",
+                    flush=True,
+                )
     if bar:
         bar.close()
 
@@ -127,7 +135,7 @@ def main() -> None:
             if not part.empty:
                 frames.append(part)
     fund = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(
-        columns=["code", "year", "ann_date", "roe", "netprofit_yoy", "debt_to_assets", "net_profit", "cfo"]
+        columns=["code", "year", "ann_date", "roe", "netprofit_yoy", "debt_ratio", "net_profit", "cfo"]
     )
     if args.years and not fund.empty:
         max_year = int(pd.to_numeric(fund["year"], errors="coerce").max())
