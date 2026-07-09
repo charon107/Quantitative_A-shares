@@ -1,0 +1,43 @@
+name: 服务器诊断与重预热
+
+# 一次性运维：本机直连服务器不通时，经 runner 查看服务器状态、
+# 校验 DuckDB 各表行数、清理残留 warmup 进程并后台重跑预热。
+on:
+  workflow_dispatch: {}
+
+jobs:
+  ops:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: 诊断 + 后台重预热
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          command_timeout: 10m
+          script: |
+            cd /root/Quantitative_A-shares/WechatNum
+            export PATH="/root/.local/bin:$PATH"
+            export DUCKDB_PATH=/root/Quantitative_A-shares/WechatNum/market.duckdb
+            echo "=== 系统 ==="; uptime; free -m | head -2; df -h / | tail -1
+            echo "=== TOP 进程 ==="; ps aux --sort=-%cpu | head -8
+            echo "=== 残留 warmup ==="; pgrep -af warmup_redis || echo "无残留"
+            pkill -f warmup_redis || true
+            echo "=== api 状态 ==="; systemctl is-active api; journalctl -u api -n 10 --no-pager | tail -10
+            echo "=== 库各表行数 ==="
+            uv run python - <<'PYEOF'
+            from src import db
+            tables = ["kline","raw_kline","adj_factor","stock_meta","stock_fundamental",
+                      "selected_stocks","ths_hot","index_daily","stock_info","meta_kv"]
+            with db.connect(read_only=True) as conn:
+                for t in tables:
+                    print(f"{t}: {conn.execute(f'SELECT COUNT(*) FROM {t}').fetchone()[0]}")
+                print("kline 日期范围:", conn.execute("SELECT MIN(date), MAX(date) FROM kline").fetchone())
+            PYEOF
+            echo "=== backups/ ==="; ls -lh backups/ 2>/dev/null | tail -6
+            echo "=== 重预热(后台,不阻塞) ==="
+            nohup uv run python deploy/warmup_redis.py > /root/warmup.log 2>&1 &
+            echo "warmup 已后台启动 pid=$!"
