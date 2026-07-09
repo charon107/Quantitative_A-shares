@@ -26,6 +26,8 @@ jobs:
             echo "=== TOP 进程 ==="; ps aux --sort=-%cpu | head -8
             echo "=== 残留 warmup ==="; pgrep -af warmup_redis || echo "无残留"
             pkill -f warmup_redis || true
+            echo "=== 更新代码(含看板窗口内存修复)并重启 api ==="
+            bash deploy/update.sh
             echo "=== api 状态 ==="; systemctl is-active api; journalctl -u api -n 10 --no-pager | tail -10
             echo "=== 库各表行数 ==="
             uv run python - <<'PYEOF'

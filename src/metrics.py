@@ -52,12 +52,15 @@ def market_breadth(df: pd.DataFrame) -> dict:
 
 # ========== 等权指数 ==========
 def _equal_weighted_index_sql(code_filter: str = "") -> str:
+    # CTE 内先按日期截窗（多留 30 天日历缓冲供 LAG 取前收），避免窗口函数
+    # 扫全表——库存 13 年历史后全表扫会拖垮小服务器。
+    extra = f"AND {code_filter}" if code_filter else ""
     return f"""
         WITH r AS (
             SELECT date,
                    close / LAG(close) OVER (PARTITION BY code ORDER BY date) - 1 AS ret
             FROM kline
-            {code_filter}
+            WHERE date >= CAST(? AS DATE) - INTERVAL 30 DAY {extra}
         )
         SELECT date, AVG(ret) AS daily_return
         FROM r
@@ -67,18 +70,24 @@ def _equal_weighted_index_sql(code_filter: str = "") -> str:
     """
 
 
-def equal_weighted_index(start_date: str = config.START_DATE, path: str | None = None) -> pd.Series:
+def equal_weighted_index(
+    start_date: str = config.DASHBOARD_START_DATE, path: str | None = None
+) -> pd.Series:
     """等权组合累计收益（全市场主版）。index=日期，value=累计收益率。"""
-    daily = db.query_df(_equal_weighted_index_sql(), [start_date], path=path)
+    daily = db.query_df(_equal_weighted_index_sql(), [start_date, start_date], path=path)
     if daily.empty:
         return pd.Series(dtype=float)
     s = daily.set_index("date")["daily_return"].astype(float)
     return (1 + s).cumprod() - 1
 
 
-def shanghai_equal_weighted_index(start_date: str = config.START_DATE, path: str | None = None) -> pd.Series:
+def shanghai_equal_weighted_index(
+    start_date: str = config.DASHBOARD_START_DATE, path: str | None = None
+) -> pd.Series:
     """上证主板等权组合累计收益（仅 sh.60xxxx）。"""
-    daily = db.query_df(_equal_weighted_index_sql("WHERE code LIKE 'sh.6%'"), [start_date], path=path)
+    daily = db.query_df(
+        _equal_weighted_index_sql("code LIKE 'sh.6%'"), [start_date, start_date], path=path
+    )
     if daily.empty:
         return pd.Series(dtype=float)
     s = daily.set_index("date")["daily_return"].astype(float)
@@ -89,19 +98,21 @@ def shanghai_equal_weighted_index(start_date: str = config.START_DATE, path: str
 def limit_up_down_series(
     up_threshold: float = 9.9,
     down_threshold: float = -9.9,
+    start_date: str = config.DASHBOARD_START_DATE,
     path: str | None = None,
 ) -> pd.DataFrame:
-    """每日涨停/跌停家数走势。列：date / limit_up / limit_down。"""
+    """每日涨停/跌停家数走势（看板窗口内）。列：date / limit_up / limit_down。"""
     df = db.query_df(
         """
         SELECT date,
                SUM(CASE WHEN pctChg >= ? THEN 1 ELSE 0 END) AS limit_up,
                SUM(CASE WHEN pctChg <= ? THEN 1 ELSE 0 END) AS limit_down
         FROM kline
+        WHERE date >= ?
         GROUP BY date
         ORDER BY date
         """,
-        [up_threshold, down_threshold],
+        [up_threshold, down_threshold, start_date],
         path=path,
     )
     if df.empty:
@@ -115,9 +126,10 @@ def limit_up_down_series(
 def breadth_series(
     up_threshold: float = 9.9,
     down_threshold: float = -9.9,
+    start_date: str = config.DASHBOARD_START_DATE,
     path: str | None = None,
 ) -> pd.DataFrame:
-    """每日市场涨跌家数走势（一条 SQL 同时给出 上涨/下跌/涨停/跌停）。
+    """每日市场涨跌家数走势（看板窗口内，一条 SQL 同时给出 上涨/下跌/涨停/跌停）。
 
     列：date / up / down / limit_up / limit_down。
     """
@@ -129,10 +141,11 @@ def breadth_series(
                SUM(CASE WHEN pctChg >= ? THEN 1 ELSE 0 END) AS limit_up,
                SUM(CASE WHEN pctChg <= ? THEN 1 ELSE 0 END) AS limit_down
         FROM kline
+        WHERE date >= ?
         GROUP BY date
         ORDER BY date
         """,
-        [up_threshold, down_threshold],
+        [up_threshold, down_threshold, start_date],
         path=path,
     )
     if df.empty:
@@ -255,18 +268,25 @@ def search_stocks(query: str, limit: int = 50, path: str | None = None) -> pd.Da
 
 # ========== MA5 > MA20 多头时长 ==========
 def ma_duration_samples(
-    start_date: str = "2025-01-01",
+    start_date: str = config.DASHBOARD_START_DATE,
     ma_short: int = 5,
     ma_long: int = 20,
     path: str | None = None,
 ) -> pd.DataFrame:
     """全市场 MA{short}>MA{long} 金叉区间样本（DuckDB 一次拉取 + 复用纯函数）。
 
+    只拉取窗口起点前 90 天（日历）以来的行——MA{long} 需要窗口起点前的
+    前置数据，90 天足够覆盖 20 个交易日 + 长假；此前是全表拉取，库存
+    13 年历史后会把 758 万行灌进 pandas 直接耗尽小服务器内存。
+    extract_samples 仍按 start_date 过滤上穿日，结果与全量拉取一致。
+
     返回 detail：code/start_date/end_date/duration/ongoing，按时长降序。
     """
     cols = ["code", "start_date", "end_date", "duration", "ongoing"]
     allrows = db.query_df(
-        "SELECT code, date, close FROM kline ORDER BY code, date",
+        "SELECT code, date, close FROM kline "
+        "WHERE date >= CAST(? AS DATE) - INTERVAL 90 DAY ORDER BY code, date",
+        [start_date],
         path=path,
     )
     if allrows.empty:

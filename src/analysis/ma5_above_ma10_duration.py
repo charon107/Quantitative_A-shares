@@ -36,7 +36,7 @@ from src import config
 DATA_DIR = "股价数据_parquet_fq"
 KLINE_SUBDIR = "kline_fq"
 
-START_DATE = config.START_DATE   # 只计入上穿日 >= 此日期的样本
+START_DATE = config.DASHBOARD_START_DATE   # 只计入上穿日 >= 此日期的样本（看板窗口）
 MA_SHORT = 5
 MA_LONG = 20
 

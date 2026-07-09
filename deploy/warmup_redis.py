@@ -1,7 +1,7 @@
 """Redis 缓存预热：手动计算并存入 Redis。服务器上数据刷新后执行一次。
 
-缓存 key/参数与 src/api/services.py 一致（start_date 用 config.START_DATE），
-确保 API 首屏直接命中。
+缓存 key/参数与 src/api/services.py 一致（start_date 用
+config.DASHBOARD_START_DATE），确保 API 首屏直接命中。
 用法：uv run python deploy/warmup_redis.py
 """
 import os
@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src import cache, config, metrics  # noqa: E402
 
-START = config.START_DATE
+START = config.DASHBOARD_START_DATE
 
 print(f"Redis 可用: {cache.is_available()}")
 print(f"DuckDB: {metrics.db.DUCKDB_PATH}  start_date: {START}")

@@ -8,7 +8,7 @@ from __future__ import annotations
 import pandas as pd
 
 from src import cache, metrics
-from src.config import START_DATE as DEFAULT_START
+from src.config import DASHBOARD_START_DATE as DEFAULT_START
 
 
 def latest_day() -> pd.DataFrame:
