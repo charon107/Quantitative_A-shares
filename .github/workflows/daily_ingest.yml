@@ -19,7 +19,7 @@ concurrency:
 jobs:
   daily:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 90   # 历史窗口扩至 2013 后，全市场 qfq 重算在 2vCPU 上明显变慢
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5

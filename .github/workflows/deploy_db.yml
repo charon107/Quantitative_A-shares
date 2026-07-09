@@ -1,0 +1,79 @@
+name: 部署全量日线快照 DB
+
+# 本机 -> 服务器直连不稳时的中转部署：本地把 reingest_all.py 生成的
+# market.duckdb 上传到 GitHub Release，runner 下载后 scp 到服务器，
+# 服务器合并生产库的非日线表（基本面/选股/指数/人气/公司）进新库，
+# 再 atomic_swap 原子替换（旧库自动进 backups/），最后清缓存预热。
+#
+# 用法：
+#   1) 本地：gh release create db-snapshot-YYYYMMDD market.duckdb
+#   2) 触发：gh workflow run deploy_db.yml -f release_tag=db-snapshot-YYYYMMDD
+#
+# 注意：目标目录用项目下 incoming/（/tmp 是 tmpfs，放不下 1.1GB）。
+# 服务器 git pull 偶发 TLS 失败（set -e 中止、无脏数据），重跑即可。
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "存放 market.duckdb 的 release tag"
+        required: true
+
+concurrency:
+  group: daily-ingest   # 与每日入库互斥，避免同时写库
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: 下载快照 release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p snapshot
+          gh release download "${{ inputs.release_tag }}" \
+            --repo "${{ github.repository }}" --pattern market.duckdb --dir snapshot
+          mv snapshot/market.duckdb snapshot/market_new.duckdb
+          ls -lh snapshot
+
+      - name: 传快照到服务器 incoming/
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          command_timeout: 40m
+          source: "snapshot/*"
+          target: "/root/Quantitative_A-shares/WechatNum/incoming/"
+          strip_components: 1
+
+      - name: 服务器合并保留表 + 原子替换 + 预热
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          command_timeout: 40m
+          script: |
+            set -e
+            cd /root/Quantitative_A-shares/WechatNum
+            export PATH="/root/.local/bin:$PATH"
+            export DUCKDB_PATH=/root/Quantitative_A-shares/WechatNum/market.duckdb
+            df -h / | tail -1
+            # 1) 代码更新到 main 最新（含 START_DATE=2013 与本 workflow 依赖的脚本）
+            bash deploy/update.sh
+            # 2) 生产库非日线表合并进新库（READ_ONLY ATTACH，不影响在线服务）
+            uv run python scripts/merge_keep_tables.py incoming/market_new.duckdb
+            # 3) 原子替换（旧库 rename 进 backups/ 留恢复点）
+            systemctl stop api
+            uv run python -c "from src import db; db.atomic_swap('incoming/market_new.duckdb')"
+            systemctl start api
+            rm -rf incoming
+            # 4) 清 Redis + 预热
+            uv run python -m src.cache clear
+            uv run python deploy/warmup_redis.py || echo "[deploy] warmup 失败（不阻塞）"
+            df -h / | tail -1
+            echo "[deploy] 完成"
