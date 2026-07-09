@@ -166,6 +166,50 @@ def test_ann_date_falls_back_to_income():
     assert by_year.loc[2013, "ann_date"] == "2014-04-20"  # income 兜底
 
 
+def test_ann_date_falls_back_to_balancesheet_and_cashflow():
+    """fina 和 income 都缺 ann_date 时，依次回退到 balancesheet → cashflow。"""
+    out = assemble_annual_fundamental(
+        CODE,
+        _fina([2012], roe=[0.2], yoy=[0.15]),  # fina 有 ann_date
+        _inc([2012, 2013], np_list=[100.0, 120.0]),  # income 有 ann_date
+        _cf([2012, 2013], cfo=[90.0, 100.0]),  # cf 无 ann_date（旧格式）
+        _bal([2012, 2013]),  # bal 无 ann_date（旧格式）
+    )
+    by_year = out.set_index("year")
+    # 2012: fina 有值，优先用
+    assert by_year.loc[2012, "ann_date"] == "2013-04-15"
+    # 2013: fina 缺失，income 兜底
+    assert by_year.loc[2013, "ann_date"] == "2014-04-20"
+
+
+def test_ann_date_four_level_fallback():
+    """四级回退：fina(缺) → income(缺) → balancesheet(有) → cashflow。"""
+    # 模拟 fina/income 缺 ann_date，仅 balancesheet 有
+    fina = pd.DataFrame({
+        "code": CODE, "year": [2013],
+        "roe": [0.2], "netprofit_yoy": [0.15],
+        # 无 ann_date 列
+    })
+    inc = pd.DataFrame({
+        "code": CODE, "year": [2013],
+        "net_profit": [120.0],
+        # 无 ann_date 列
+    })
+    cf = pd.DataFrame({
+        "code": CODE, "year": [2013], "cfo": [100.0],
+        # 无 ann_date 列
+    })
+    bal = pd.DataFrame({
+        "code": CODE, "year": [2013],
+        "ann_date": ["2014-03-30"],  # balancesheet 的公告日
+        "st_borr": [50.0], "lt_borr": [100.0], "bond_payable": [0.0],
+        "total_assets": [1000.0], "equity": [600.0],
+    })
+    out = assemble_annual_fundamental(CODE, fina, inc, cf, bal)
+    by_year = out.set_index("year")
+    assert by_year.loc[2013, "ann_date"] == "2014-03-30"  # balancesheet 兜底
+
+
 def test_all_empty_inputs():
     """四个输入全空 -> 空结果（列齐全）。"""
     empty = pd.DataFrame()

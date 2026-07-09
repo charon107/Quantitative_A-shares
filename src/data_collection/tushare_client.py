@@ -532,29 +532,30 @@ def fetch_income(code: str) -> pd.DataFrame:
 
 
 def fetch_cashflow(code: str) -> pd.DataFrame:
-    """单只股票的现金流量表（年报口径）经营活动现金流净额。返回 code/year/cfo。"""
+    """单只股票的现金流量表（年报口径）经营活动现金流净额。返回 code/year/ann_date/cfo。"""
     ts_code = _to_ts_code(code)
     df = _call_with_retry(
         f"fetch_cashflow({code})",
         _pro().cashflow,
         ts_code=ts_code,
-        fields="end_date,n_cashflow_act",
+        fields="ann_date,end_date,n_cashflow_act",
     )
     if df is None or df.empty:
-        return pd.DataFrame(columns=["code", "year", "cfo"])
+        return pd.DataFrame(columns=["code", "year", "ann_date", "cfo"])
     df = df.copy()
     df["year"] = _year_from_end_date(df["end_date"])
     df = df.dropna(subset=["year"])
+    df["ann_date"] = _ann_date_iso(df["ann_date"])
     df["cfo"] = pd.to_numeric(df.get("n_cashflow_act"), errors="coerce")
     df["code"] = code
     df = df.sort_values("year").drop_duplicates("year", keep="last")
-    return df[["code", "year", "cfo"]].reset_index(drop=True)
+    return df[["code", "year", "ann_date", "cfo"]].reset_index(drop=True)
 
 
 def fetch_balancesheet(code: str) -> pd.DataFrame:
     """单只股票的资产负债表（年报口径）。
 
-    返回列：code/year/st_borr/lt_borr/bond_payable/total_assets/equity。
+    返回列：code/year/ann_date/st_borr/lt_borr/bond_payable/total_assets/equity。
     st_borr/lt_borr/bond_payable 用于算总债务（策略条件3 的有息负债口径），
     equity（归母净资产 total_hldr_eqy_exc_min_int）用于推算平均净资产 ROE。
     """
@@ -565,7 +566,7 @@ def fetch_balancesheet(code: str) -> pd.DataFrame:
         ts_code=ts_code,
         fields="ann_date,end_date,st_borr,lt_borr,bond_payable,total_assets,total_hldr_eqy_exc_min_int",
     )
-    cols = ["code", "year", "st_borr", "lt_borr", "bond_payable", "total_assets", "equity"]
+    cols = ["code", "year", "ann_date", "st_borr", "lt_borr", "bond_payable", "total_assets", "equity"]
     if df is None or df.empty:
         return pd.DataFrame(columns=cols)
     df = df.copy()
@@ -605,6 +606,9 @@ def assemble_annual_fundamental(
     fina 缺失年份需要推算，是因为代理的 fina_indicator 缺 2006-2011 整段，
     而三大报表全历史齐全（见 fetch_fina_indicator 注）。
 
+    ann_date 四级回退：fina_indicator → income → balancesheet → cashflow，
+    确保尽可能多的年份有公告日（用于前端股价图财报竖线）。
+
     返回列：code/year/ann_date/roe/netprofit_yoy/debt_ratio/net_profit/cfo。
     """
     out_cols = ["code", "year", "ann_date", *METRIC_COLUMNS]
@@ -612,12 +616,19 @@ def assemble_annual_fundamental(
     def _prep(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
         if df is None or df.empty:
             return pd.DataFrame(columns=["year", *cols])
-        return df[["year", *cols]].copy()
+        available = ["year"] + [c for c in cols if c in df.columns]
+        result = df[available].copy()
+        for c in cols:
+            if c not in df.columns:
+                result[c] = pd.NA
+        return result
 
     f = _prep(fina, ["ann_date", "roe", "netprofit_yoy"])
     i = _prep(inc, ["ann_date", "net_profit"]).rename(columns={"ann_date": "ann_date_inc"})
-    c = _prep(cf, ["cfo"])
-    b = _prep(bal, ["st_borr", "lt_borr", "bond_payable", "total_assets", "equity"])
+    c = _prep(cf, ["ann_date", "cfo"]).rename(columns={"ann_date": "ann_date_cf"})
+    b = _prep(bal, ["ann_date", "st_borr", "lt_borr", "bond_payable", "total_assets", "equity"]).rename(
+        columns={"ann_date": "ann_date_bal"}
+    )
 
     df = (
         f.merge(i, on="year", how="outer")
@@ -634,6 +645,10 @@ def assemble_annual_fundamental(
         df["ann_date"] = pd.NA
     if "ann_date_inc" not in df.columns:
         df["ann_date_inc"] = pd.NA
+    if "ann_date_bal" not in df.columns:
+        df["ann_date_bal"] = pd.NA
+    if "ann_date_cf" not in df.columns:
+        df["ann_date_cf"] = pd.NA
 
     # 上一年的值只在年份连续时可用（yoy 与平均净资产都依赖上年）
     consecutive = df["year"].diff().eq(1)
@@ -651,7 +666,7 @@ def assemble_annual_fundamental(
     avg_eq = (df["equity"] + eq_prev) / 2
     df["roe"] = df["roe"].fillna(df["net_profit"] / avg_eq.where(avg_eq > 0))
 
-    df["ann_date"] = df["ann_date"].fillna(df["ann_date_inc"])
+    df["ann_date"] = df["ann_date"].fillna(df["ann_date_inc"]).fillna(df["ann_date_bal"]).fillna(df["ann_date_cf"])
     df["code"] = code
     df = df.dropna(subset=list(METRIC_COLUMNS), how="all")
     return df[out_cols].reset_index(drop=True)

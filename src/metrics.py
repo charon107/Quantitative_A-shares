@@ -346,7 +346,7 @@ def screening_chart(year: int, code: str, ma_n: int = 20, path: str | None = Non
     """复刻原 matplotlib 三特性所需的数据：
 
     - 个股/指数收盘价:从 {year}-01-01 截断到「次年首个财报公布日」(next_pub)
-    - pub_dates:当年(日历年 year)内的财报公布日竖线
+    - pub_dates:价格数据实际覆盖区间 [year-01-01, next_pub] 内的所有财报公布日竖线
     - next_pub:模拟持有到下次财报的截断终点
 
     返回 dict：code/code_name/next_pub/pub_dates/stock[]/index[]。
@@ -364,9 +364,15 @@ def screening_chart(year: int, code: str, ma_n: int = 20, path: str | None = Non
     y_start = pd.Timestamp(year=year, month=1, day=1)
     y_end = pd.Timestamp(year=year + 1, month=1, day=1)
     y1_end = pd.Timestamp(year=year + 2, month=1, day=1)
-    pub_dates = [d for d in ann_dates if y_start <= d < y_end]
     next_list = [d for d in ann_dates if y_end <= d < y1_end]
     next_pub = next_list[0] if next_list else None
+
+    # pub_dates: 价格数据实际覆盖区间内的所有公告日（而非仅限日历年）
+    # 区间为 [year-01-01, next_pub]（next_pub 为 None 时不设上界）
+    if next_pub is not None:
+        pub_dates = [d for d in ann_dates if y_start <= d <= next_pub]
+    else:
+        pub_dates = [d for d in ann_dates if y_start <= d]
 
     start = f"{year}-01-01"
     end = next_pub.strftime("%Y-%m-%d") if next_pub is not None else None
