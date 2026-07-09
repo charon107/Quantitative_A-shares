@@ -24,9 +24,8 @@ jobs:
             export DUCKDB_PATH=/root/Quantitative_A-shares/WechatNum/market.duckdb
             echo "=== 系统 ==="; uptime; free -m | head -2; df -h / | tail -1
             echo "=== TOP 进程 ==="; ps aux --sort=-%cpu | head -8
-            # [w] 写法防止模式匹配到携带本脚本全文的 bash -c 进程自身
-            echo "=== 残留 warmup ==="; pgrep -af "[w]armup_redis" || echo "无残留"
-            pkill -f "[w]armup_redis" || true
+            # 不做 pkill:模式无论怎么写都会匹配到携带脚本全文的 bash -c 自身;
+            # 残留进程看 TOP 输出,需要时人工处理
             echo "=== 更新代码(含看板窗口内存修复)并重启 api ==="
             bash deploy/update.sh
             echo "=== api 状态 ==="; systemctl is-active api; journalctl -u api -n 10 --no-pager | tail -10
