@@ -15,6 +15,8 @@ code->name 从 `stock_meta` 取。
 """
 from __future__ import annotations
 
+from datetime import date
+
 import pandas as pd
 
 from src import db
@@ -33,7 +35,18 @@ WINDOW_YEARS = 5  # 最近 5 年
 EXCLUDED_INDUSTRIES = ("银行",)
 
 DEFAULT_START_YEAR = 2013
-DEFAULT_END_YEAR = 2025
+
+# 年报披露截止 4/30：5 月起才能用去年年报（fy_end = 去年）对当年选股。
+ANNUAL_REPORT_DEADLINE_MONTH = 5
+
+
+def default_end_year(today: date | None = None) -> int:
+    """选股年份上限：今年（年报披露季结束后）或去年（1–4 月，去年年报未披露完）。"""
+    d = today or date.today()
+    return d.year if d.month >= ANNUAL_REPORT_DEADLINE_MONTH else d.year - 1
+
+
+DEFAULT_END_YEAR = default_end_year()
 
 
 def compute_cagr(v_start: float, v_end: float, years: int) -> float:

@@ -1,16 +1,20 @@
 name: 服务器诊断与重预热
 
-# 一次性运维（2026-07-09 部署收尾）：杀残留旧版 warmup → git pull 重试
-# → 从滚动备份恢复基本面等非日线表 → 原子替换 → 重启 api → 轻量预热。
+# 一次性运维（2026-07-09）：重算逐年选股（DEFAULT_END_YEAR 动态化后补出 2026 年）。
+# load_fundamentals.py 传空目录 = 不 upsert 新数据、只用库里现有年报面板重跑选股。
 on:
   workflow_dispatch: {}
+
+concurrency:
+  group: daily-ingest   # 与每日入库/部署互斥，避免并发 copy2+swap 丢数据
+  cancel-in-progress: false
 
 jobs:
   ops:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - name: 恢复基本面表 + 更新代码 + 重预热
+      - name: 更新代码 + 重算选股 + 验证
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.SERVER_HOST }}
@@ -23,24 +27,30 @@ jobs:
             cd /root/Quantitative_A-shares/WechatNum
             export PATH="/root/.local/bin:$PATH"
             export DUCKDB_PATH=/root/Quantitative_A-shares/WechatNum/market.duckdb
-            echo "=== 杀残留 warmup(排除本会话自身) ==="
-            for p in $(pgrep -f "warmup"); do { [ "$p" != "$$" ] && [ "$p" != "$PPID" ] && kill -9 "$p" 2>/dev/null; } || true; done
-            sleep 1
-            echo "=== git pull(重试 5 次,TLS 偶发失败) ==="
+            echo "=== git pull(重试 5 次) ==="
             ok=""
             for i in 1 2 3 4 5; do git pull --ff-only origin main && ok=1 && break; echo "pull 失败,重试 $i"; sleep 8; done
             [ -n "$ok" ]
             git log -1 --oneline
-            echo "=== 从滚动备份恢复基本面等非日线表 ==="
-            cp market.duckdb market.duckdb.merge_tmp
-            DUCKDB_PATH=backups/market-20260708-205443.duckdb \
-              uv run python scripts/merge_keep_tables.py market.duckdb.merge_tmp
-            echo "=== 原子替换 + 重启 api ==="
-            systemctl stop api
-            uv run python -c "from src import db; db.atomic_swap('market.duckdb.merge_tmp')"
-            systemctl start api
-            echo "=== 清缓存 + 后台预热(新代码看板窗口版) ==="
-            uv run python -m src.cache clear
+            echo "=== 重算逐年选股(空目录=只重算,不 upsert) ==="
+            mkdir -p /tmp/empty_fund
+            uv run python scripts/load_fundamentals.py /tmp/empty_fund
+            echo "=== 验证:年报与选股年份分布 ==="
+            uv run python - <<'PYEOF'
+            from src import db
+            with db.connect(read_only=True) as conn:
+                print("stock_fundamental 最近年份:")
+                for y, n in conn.execute(
+                    "SELECT year, COUNT(*) FROM stock_fundamental GROUP BY year ORDER BY year DESC LIMIT 4"
+                ).fetchall():
+                    print(f"  {y}: {n} 只")
+                print("selected_stocks 逐年家数:")
+                for y, n in conn.execute(
+                    "SELECT year, COUNT(*) FROM selected_stocks GROUP BY year ORDER BY year"
+                ).fetchall():
+                    print(f"  {y}: {n} 只")
+            PYEOF
+            echo "=== 后台预热 ==="
             nohup uv run python deploy/warmup_redis.py > /root/warmup.log 2>&1 &
-            echo "warmup 已后台启动 pid=$!"
-            free -m | head -2; df -h / | tail -1
+            echo "warmup pid=$!"
+            free -m | head -2

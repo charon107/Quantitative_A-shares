@@ -160,3 +160,20 @@ def test_select_pool_excludes_bank_industry():
     # 无行业记录不剔除
     out2 = fs.select_pool(_panel(bank), {}, start_year=2018, end_year=2018, industries={"x": "y"})
     assert list(out2["code"]) == ["sh.600000"]
+
+
+# ===== default_end_year：年报披露季边界 =====
+from datetime import date
+
+from src.analysis.fundamental_screen import default_end_year
+
+
+def test_default_end_year_after_disclosure_deadline_uses_current_year():
+    assert default_end_year(date(2026, 5, 1)) == 2026
+    assert default_end_year(date(2026, 7, 9)) == 2026
+    assert default_end_year(date(2026, 12, 31)) == 2026
+
+
+def test_default_end_year_before_deadline_uses_previous_year():
+    assert default_end_year(date(2026, 1, 1)) == 2025
+    assert default_end_year(date(2026, 4, 30)) == 2025
