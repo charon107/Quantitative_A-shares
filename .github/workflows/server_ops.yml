@@ -1,45 +1,46 @@
 name: 服务器诊断与重预热
 
-# 一次性运维：本机直连服务器不通时，经 runner 查看服务器状态、
-# 校验 DuckDB 各表行数、清理残留 warmup 进程并后台重跑预热。
+# 一次性运维（2026-07-09 部署收尾）：杀残留旧版 warmup → git pull 重试
+# → 从滚动备份恢复基本面等非日线表 → 原子替换 → 重启 api → 轻量预热。
 on:
   workflow_dispatch: {}
 
 jobs:
   ops:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
-      - name: 诊断 + 后台重预热
+      - name: 恢复基本面表 + 更新代码 + 重预热
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           password: ${{ secrets.SERVER_PASSWORD }}
           port: ${{ secrets.SERVER_PORT || 22 }}
-          command_timeout: 10m
+          command_timeout: 15m
           script: |
+            set -e
             cd /root/Quantitative_A-shares/WechatNum
             export PATH="/root/.local/bin:$PATH"
             export DUCKDB_PATH=/root/Quantitative_A-shares/WechatNum/market.duckdb
-            echo "=== 系统 ==="; uptime; free -m | head -2; df -h / | tail -1
-            echo "=== TOP 进程 ==="; ps aux --sort=-%cpu | head -8
-            # 不做 pkill:模式无论怎么写都会匹配到携带脚本全文的 bash -c 自身;
-            # 残留进程看 TOP 输出,需要时人工处理
-            echo "=== 更新代码(含看板窗口内存修复)并重启 api ==="
-            bash deploy/update.sh
-            echo "=== api 状态 ==="; systemctl is-active api; journalctl -u api -n 10 --no-pager | tail -10
-            echo "=== 库各表行数 ==="
-            uv run python - <<'PYEOF'
-            from src import db
-            tables = ["kline","raw_kline","adj_factor","stock_meta","stock_fundamental",
-                      "selected_stocks","ths_hot","index_daily","stock_info","meta_kv"]
-            with db.connect(read_only=True) as conn:
-                for t in tables:
-                    print(f"{t}: {conn.execute(f'SELECT COUNT(*) FROM {t}').fetchone()[0]}")
-                print("kline 日期范围:", conn.execute("SELECT MIN(date), MAX(date) FROM kline").fetchone())
-            PYEOF
-            echo "=== backups/ ==="; ls -lh backups/ 2>/dev/null | tail -6
-            echo "=== 重预热(后台,不阻塞) ==="
+            echo "=== 杀残留 warmup(排除本会话自身) ==="
+            for p in $(pgrep -f "warmup"); do { [ "$p" != "$$" ] && [ "$p" != "$PPID" ] && kill -9 "$p" 2>/dev/null; } || true; done
+            sleep 1
+            echo "=== git pull(重试 5 次,TLS 偶发失败) ==="
+            ok=""
+            for i in 1 2 3 4 5; do git pull --ff-only origin main && ok=1 && break; echo "pull 失败,重试 $i"; sleep 8; done
+            [ -n "$ok" ]
+            git log -1 --oneline
+            echo "=== 从滚动备份恢复基本面等非日线表 ==="
+            cp market.duckdb market.duckdb.merge_tmp
+            DUCKDB_PATH=backups/market-20260708-205443.duckdb \
+              uv run python scripts/merge_keep_tables.py market.duckdb.merge_tmp
+            echo "=== 原子替换 + 重启 api ==="
+            systemctl stop api
+            uv run python -c "from src import db; db.atomic_swap('market.duckdb.merge_tmp')"
+            systemctl start api
+            echo "=== 清缓存 + 后台预热(新代码看板窗口版) ==="
+            uv run python -m src.cache clear
             nohup uv run python deploy/warmup_redis.py > /root/warmup.log 2>&1 &
             echo "warmup 已后台启动 pid=$!"
+            free -m | head -2; df -h / | tail -1
