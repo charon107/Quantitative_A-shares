@@ -59,6 +59,9 @@ jobs:
             export PATH="/root/.local/bin:$PATH"
             export DUCKDB_PATH=/root/Quantitative_A-shares/WechatNum/market.duckdb
             export INGEST_STATE_PATH=/root/Quantitative_A-shares/WechatNum/ingest_state.json
-            uv run python -u scripts/load_all_parquet.py /tmp/ingest
+            # 入库进程单独放宽 DuckDB 内存（默认 400MB 曾在 758 万行大表上 OOM）；
+            # 只影响本命令，API 服务与 warmup 仍用默认值
+            DUCKDB_MEMORY_LIMIT=600MB DUCKDB_THREADS=1 \
+              uv run python -u scripts/load_all_parquet.py /tmp/ingest
             uv run python -u deploy/warmup_redis.py || true
             rm -rf /tmp/ingest

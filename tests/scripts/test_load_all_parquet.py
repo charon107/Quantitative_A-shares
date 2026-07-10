@@ -78,6 +78,28 @@ def test_factor_changed_recomputes_full_history(env, capsys):
     assert kl["close"].tolist() == pytest.approx([5.0, 5.5, 5.25, 6.0, 6.5, 7.0])
 
 
+def test_periodic_checkpoint_and_stale_wal_cleanup(env, capsys, monkeypatch):
+    """每 _PROGRESS_EVERY 只 CHECKPOINT 一次；上次 abort 残留的 .new/.wal 先被清掉。"""
+    monkeypatch.setattr(load_all, "_PROGRESS_EVERY", 1)
+    _seed(env, capsys)
+
+    # 伪造上次 abort 的残留：.new 与 .new.wal（若不清理会被重放到新副本）
+    stale_new = db.DUCKDB_PATH + ".new"
+    with open(stale_new, "w") as f:
+        f.write("stale")
+    with open(stale_new + ".wal", "w") as f:
+        f.write("stale-wal")
+
+    d = _write_ingest(env / "day2", _raw_df("sh.600000", ["2025-01-09"], [14.0]), _adj_df("sh.600000", ["2025-01-09"], [1.0]))
+    load_all.main(d)
+
+    out = capsys.readouterr().out
+    assert "qfq 进度 1/1" in out  # CHECKPOINT 分支被执行
+    assert not os.path.exists(stale_new + ".wal")
+    kl = db.query_df("SELECT close FROM kline WHERE code='sh.600000' ORDER BY date")
+    assert len(kl) == 6
+
+
 def test_new_listing_gets_full_compute(env, capsys):
     _seed(env, capsys)
 

@@ -102,7 +102,11 @@ def _recompute_qfq(conn, kmax) -> tuple[int, int]:
         except Exception as e:
             print(f"[load_all] {code} qfq 失败：{e}")
         if i % _PROGRESS_EVERY == 0:
+            # 定期把脏页/WAL 落盘：758 万行大表上连续 upsert 会把 buffer pool
+            # 占满不可逐出的脏页，400MB memory_limit 下曾 OOM abort（2026-07-10）
+            conn.execute("CHECKPOINT")
             print(f"[load_all] qfq 进度 {i}/{len(touched)}", flush=True)
+    conn.execute("CHECKPOINT")
     return n_full, n_incr
 
 
@@ -121,8 +125,12 @@ def main(d: str | None = None) -> None:
     dest = db.DUCKDB_PATH
     _lock = _acquire_lock(dest + ".ingest.lock")  # noqa: F841 持有到进程退出
     tmp = dest + ".new"
-    if os.path.exists(tmp):
-        os.remove(tmp)
+    # 连 .wal/.tmp 一起清：上次 abort 残留的 WAL 若不删，会被重放到本次新副本上
+    for leftover in (tmp, tmp + ".wal", tmp + ".tmp"):
+        if os.path.isdir(leftover):
+            shutil.rmtree(leftover)
+        elif os.path.exists(leftover):
+            os.remove(leftover)
     if os.path.exists(dest):
         shutil.copy2(dest, tmp)
 
