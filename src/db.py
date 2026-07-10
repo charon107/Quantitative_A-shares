@@ -304,6 +304,14 @@ def read_raw(code: str, conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     ).df()
 
 
+def read_raw_since(code: str, since, conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
+    """读某 code 自 since（含当天）起的原始日线（按 date 升序）。"""
+    return conn.execute(
+        "SELECT * FROM raw_kline WHERE code = ? AND date >= ? ORDER BY date",
+        [code, since],
+    ).df()
+
+
 def read_adj(code: str, conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     """读某 code 的完整复权因子（trade_date 升序）。列名兼容 compute_qfq。"""
     return conn.execute(

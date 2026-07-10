@@ -50,13 +50,15 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           password: ${{ secrets.SERVER_PASSWORD }}
           port: ${{ secrets.SERVER_PORT || 22 }}
-          command_timeout: 25m
+          # 须小于 job 的 timeout-minutes：除权除息多的日子全量重算的 code 多，
+          # 25m 曾被掐断留下残留进程（2026-07-10）
+          command_timeout: 85m
           script: |
             set -e
             cd /root/Quantitative_A-shares/WechatNum
             export PATH="/root/.local/bin:$PATH"
             export DUCKDB_PATH=/root/Quantitative_A-shares/WechatNum/market.duckdb
             export INGEST_STATE_PATH=/root/Quantitative_A-shares/WechatNum/ingest_state.json
-            uv run python scripts/load_all_parquet.py /tmp/ingest
-            uv run python deploy/warmup_redis.py || true
+            uv run python -u scripts/load_all_parquet.py /tmp/ingest
+            uv run python -u deploy/warmup_redis.py || true
             rm -rf /tmp/ingest

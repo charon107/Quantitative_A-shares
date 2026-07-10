@@ -4,7 +4,11 @@
 upsert raw_kline/adj_factor → 对「有新交易日」的 code 重算前复权写 kline →
 upsert stock_meta / stock_info，全量替换 ths_hot；最后原子替换 + 清 Redis 缓存。
 
-用法：uv run python scripts/load_all_parquet.py /tmp/ingest
+qfq 重算分两档（qfq = raw * factor / 最新factor）：
+- 复权基准（最新复权因子）不变 → 历史 qfq 不变，只为新交易日追加（秒级）；
+- 基准变化（除权除息）或新上市 → 该 code 全量重算。
+
+用法：uv run python -u scripts/load_all_parquet.py /tmp/ingest
 随后由 workflow 调 deploy/warmup_redis.py 预热。
 """
 from __future__ import annotations
@@ -25,14 +29,86 @@ from src import cache, db  # noqa: E402
 from src.data_collection import tushare_client as tsc  # noqa: E402
 from src.data_collection.stock_price import STATE_PATH  # noqa: E402
 
+# 每 code 比较「最新因子」与「kline 现有末日(kmax)时点的因子」：
+# 不等（或当时无因子 = 新上市/停牌后复牌）才需全量重算 qfq。
+_REBASE_SQL = """
+WITH f_new AS (
+    SELECT code, arg_max(adj_factor, trade_date) AS f FROM adj_factor GROUP BY code
+), f_old AS (
+    SELECT code, arg_max(adj_factor, trade_date) AS f FROM adj_factor
+    WHERE trade_date <= ? GROUP BY code
+)
+SELECT n.code, (o.f IS NULL OR n.f <> o.f) AS rebased
+FROM f_new n LEFT JOIN f_old o ON n.code = o.code
+"""
+
+_PROGRESS_EVERY = 500
+
 
 def _read(d: str, name: str) -> pd.DataFrame:
     p = os.path.join(d, name)
     return pd.read_parquet(p) if os.path.exists(p) else pd.DataFrame()
 
 
-def main() -> None:
-    d = sys.argv[1] if len(sys.argv) > 1 else "/tmp/ingest"
+def _acquire_lock(path: str):
+    """入库互斥锁：防止两个 load_all 并发互踩 .new 临时库。进程退出自动释放。
+
+    Linux（服务器）用 flock；Windows（本地开发）无 fcntl，跳过。
+    """
+    try:
+        import fcntl
+    except ImportError:
+        return None
+    fh = open(path, "w")
+    try:
+        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        fh.close()
+        raise SystemExit(f"[load_all] 已有入库进程在运行（{path} 被锁），本次退出")
+    return fh
+
+
+def _recompute_qfq(conn, kmax) -> tuple[int, int]:
+    """对「出现新交易日」的 code 重算/追加 qfq。返回 (全量重算数, 增量追加数)。"""
+    if kmax is not None:
+        touched = [r[0] for r in conn.execute(
+            "SELECT DISTINCT code FROM raw_kline WHERE date > ?", [kmax]
+        ).fetchall()]
+        rebased = {r[0]: bool(r[1]) for r in conn.execute(_REBASE_SQL, [kmax]).fetchall()}
+    else:
+        touched = [r[0] for r in conn.execute("SELECT DISTINCT code FROM raw_kline").fetchall()]
+        rebased = {}
+
+    n_full = 0
+    n_incr = 0
+    for i, code in enumerate(touched, 1):
+        try:
+            af = db.read_adj(code, conn)
+            if af.empty:
+                continue
+            full = kmax is None or rebased.get(code, True)
+            # 增量从 kmax 当天（含）读起：该行重写幂等，且为 compute_qfq
+            # 内部的因子 ffill 提供锚点
+            rf = db.read_raw(code, conn) if full else db.read_raw_since(code, kmax, conn)
+            if rf.empty:
+                continue
+            q = tsc.compute_qfq(rf, af, code)
+            if not q.empty:
+                db.upsert_kline(q, conn)
+                if full:
+                    n_full += 1
+                else:
+                    n_incr += 1
+        except Exception as e:
+            print(f"[load_all] {code} qfq 失败：{e}")
+        if i % _PROGRESS_EVERY == 0:
+            print(f"[load_all] qfq 进度 {i}/{len(touched)}", flush=True)
+    return n_full, n_incr
+
+
+def main(d: str | None = None) -> None:
+    if d is None:
+        d = sys.argv[1] if len(sys.argv) > 1 else "/tmp/ingest"
     raw = _read(d, "raw_recent.parquet")
     adj = _read(d, "adj_recent.parquet")
     meta = _read(d, "meta.parquet")
@@ -43,6 +119,7 @@ def main() -> None:
     print(f"[load_all] 输入：raw={len(raw)} adj={len(adj)} meta={len(meta)} company={len(comp)} hot={len(hot)} delisted={len(delisted_codes)}")
 
     dest = db.DUCKDB_PATH
+    _lock = _acquire_lock(dest + ".ingest.lock")  # noqa: F841 持有到进程退出
     tmp = dest + ".new"
     if os.path.exists(tmp):
         os.remove(tmp)
@@ -50,7 +127,6 @@ def main() -> None:
         shutil.copy2(dest, tmp)
 
     last_date = None
-    n_qfq = 0
     purged = 0
     with db.connect(read_only=False, path=tmp) as conn:
         db.init_schema(conn)
@@ -62,25 +138,7 @@ def main() -> None:
         if not adj.empty:
             db.upsert_adj(adj, conn)
 
-        # 只对「出现新交易日」的 code 重算前复权（高效；无新日则不重算）
-        if kmax is not None:
-            touched = [r[0] for r in conn.execute(
-                "SELECT DISTINCT code FROM raw_kline WHERE date > ?", [kmax]
-            ).fetchall()]
-        else:
-            touched = [r[0] for r in conn.execute("SELECT DISTINCT code FROM raw_kline").fetchall()]
-        for code in touched:
-            try:
-                rf = db.read_raw(code, conn)
-                af = db.read_adj(code, conn)
-                if rf.empty or af.empty:
-                    continue
-                q = tsc.compute_qfq(rf, af, code)
-                if not q.empty:
-                    db.upsert_kline(q, conn)
-                    n_qfq += 1
-            except Exception as e:
-                print(f"[load_all] {code} qfq 失败：{e}")
+        n_full, n_incr = _recompute_qfq(conn, kmax)
 
         if not meta.empty:
             db.upsert_meta(meta, conn)
@@ -112,7 +170,7 @@ def main() -> None:
 
     # 清 Redis（预热交给 warmup_redis.py）
     cache.invalidate_all()
-    print(f"[load_all] 完成：重算 qfq {n_qfq} 只，清理退市股 {purged} 只，最新交易日 {last_date} -> {os.path.abspath(dest)}")
+    print(f"[load_all] 完成：qfq 全量重算 {n_full} 只 + 增量追加 {n_incr} 只，清理退市股 {purged} 只，最新交易日 {last_date} -> {os.path.abspath(dest)}")
 
 
 if __name__ == "__main__":
