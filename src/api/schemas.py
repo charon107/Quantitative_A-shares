@@ -169,6 +169,114 @@ class ScreeningChart(BaseModel):
     index: list[ChartLinePoint]
 
 
+class QuarterlyFundamentalPoint(BaseModel):
+    """季度基本面单期。比率为小数、金额为元；q_ 前缀为单季口径（差分预计算，Q1=累计）。"""
+    end_date: str
+    year: int
+    quarter: int
+    ann_date: str | None = None
+    roe: float | None = None
+    roe_dt: float | None = None
+    roa: float | None = None
+    netprofit_margin: float | None = None
+    grossprofit_margin: float | None = None
+    net_profit: float | None = None
+    profit_dedt: float | None = None
+    revenue: float | None = None
+    eps: float | None = None
+    bps: float | None = None
+    debt_to_assets: float | None = None
+    or_yoy: float | None = None
+    netprofit_yoy: float | None = None
+    dt_netprofit_yoy: float | None = None
+    cfo: float | None = None
+    total_assets: float | None = None
+    total_liab: float | None = None
+    q_roe: float | None = None
+    q_dt_roe: float | None = None
+    q_netprofit_margin: float | None = None
+    q_gsprofit_margin: float | None = None
+    q_net_profit: float | None = None
+    q_revenue: float | None = None
+    q_cfo: float | None = None
+    q_sales_yoy: float | None = None
+    q_sales_qoq: float | None = None
+    q_netprofit_yoy: float | None = None
+    q_netprofit_qoq: float | None = None
+
+
+class QuarterlyFundamental(BaseModel):
+    code: str
+    code_name: str | None = None
+    points: list[QuarterlyFundamentalPoint]
+
+
+class ValuationPoint(BaseModel):
+    """估值日频单日。total_mv/circ_mv 万元、dv_* 百分数（tushare 原单位）。"""
+    date: str
+    pe: float | None = None
+    pe_ttm: float | None = None
+    pb: float | None = None
+    ps: float | None = None
+    ps_ttm: float | None = None
+    dv_ratio: float | None = None
+    dv_ttm: float | None = None
+    total_mv: float | None = None
+    circ_mv: float | None = None
+
+
+class Valuation(BaseModel):
+    code: str
+    code_name: str | None = None
+    points: list[ValuationPoint]
+
+
+class DividendRow(BaseModel):
+    """分红送股（已实施）。stk_div 每股送转股；cash_div 税后/cash_div_tax 税前 每股分红元。"""
+    end_date: str
+    ann_date: str | None = None
+    stk_div: float | None = None
+    cash_div: float | None = None
+    cash_div_tax: float | None = None
+    record_date: str | None = None
+    ex_date: str | None = None
+    pay_date: str | None = None
+
+
+class ForecastRow(BaseModel):
+    """业绩预告。p_change 为小数；net_profit_min/max 元。"""
+    end_date: str
+    ann_date: str
+    type: str | None = None
+    p_change_min: float | None = None
+    p_change_max: float | None = None
+    net_profit_min: float | None = None
+    net_profit_max: float | None = None
+    change_reason: str | None = None
+
+
+class ExpressRow(BaseModel):
+    """业绩快报。金额元；diluted_roe/yoy_* 为小数。"""
+    end_date: str
+    ann_date: str | None = None
+    revenue: float | None = None
+    operate_profit: float | None = None
+    n_income: float | None = None
+    diluted_eps: float | None = None
+    bps: float | None = None
+    diluted_roe: float | None = None
+    yoy_sales: float | None = None
+    yoy_dedu_np: float | None = None
+
+
+class EarningsNews(BaseModel):
+    """业绩动态：预告 + 快报（均早于正式财报）。"""
+    code: str
+    code_name: str | None = None
+    forecasts: list[ForecastRow]
+    express: list[ExpressRow]
+
+
 class Status(BaseModel):
     latest_date: str | None
     n_codes: int

@@ -1,6 +1,8 @@
 """服务器侧：把 runner 抓好的基本面/指数 parquet 加载进 DuckDB，并跑逐年选股写表。
 
 读取 fundamental.parquet / index.parquet，upsert stock_fundamental / index_daily →
+upsert 季度基本面/分红/业绩预告/业绩快报（fundamental_quarterly/dividend/forecast/
+express.parquet，存在才入，展示用与选股解耦）→
 跑 fundamental_screen.run_selection 全量替换 selected_stocks → 清理退市股 →
 原子替换 + 清 Redis 缓存。
 
@@ -27,13 +29,25 @@ def _read(d: str, name: str) -> pd.DataFrame:
     return pd.read_parquet(p) if os.path.exists(p) else pd.DataFrame()
 
 
+# 展示用增量产物：(parquet 文件名, db upsert 函数名)。存在才入库，与选股解耦
+_EXTRA_LOADS = (
+    ("fundamental_quarterly.parquet", "upsert_fundamental_quarterly"),
+    ("dividend.parquet", "upsert_dividend"),
+    ("forecast.parquet", "upsert_forecast"),
+    ("express.parquet", "upsert_express"),
+)
+
+
 def main() -> None:
     d = sys.argv[1] if len(sys.argv) > 1 else "/tmp/ingest_fund"
     fund = _read(d, "fundamental.parquet")
     idx = _read(d, "index.parquet")
-    print(f"[load_fund] 输入：fundamental={len(fund)} index={len(idx)}")
+    extras = {name: _read(d, name) for name, _fn in _EXTRA_LOADS}
+    extra_desc = " ".join(f"{name.split('.')[0]}={len(frame)}" for name, frame in extras.items())
+    print(f"[load_fund] 输入：fundamental={len(fund)} index={len(idx)} {extra_desc}")
 
     dest = db.DUCKDB_PATH
+    _lock = db.acquire_ingest_lock()  # noqa: F841 持有到进程退出，防与每日入库并发丢数据
     tmp = dest + ".new"
     if os.path.exists(tmp):
         os.remove(tmp)
@@ -49,6 +63,11 @@ def main() -> None:
             n_fund = db.upsert_fundamental(fund, conn)
         if not idx.empty:
             n_idx = db.upsert_index_daily(idx, conn)
+        for name, fn_name in _EXTRA_LOADS:
+            frame = extras[name]
+            if not frame.empty:
+                n = getattr(db, fn_name)(frame, conn)
+                print(f"[load_fund] {name.split('.')[0]} {n} 行")
 
         # 跑选股（用同一写连接读刚 upsert 的 fundamental + 已有 stock_meta，避免重复 open 文件）
         panel = fundamental_screen.panel_from_conn(conn)

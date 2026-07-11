@@ -4,11 +4,13 @@
 彻底绕开「服务器 -> 网关」的网络不通问题。
 
 产出（--outdir 下）：
-  raw_recent.parquet  最近 N 个交易日全市场原始日线（含换手率，沪深主板）
-  adj_recent.parquet  最近 N 个交易日复权因子
-  meta.parquet        代码->名称
-  company.parquet     公司信息（stock_basic + stock_company）
-  ths_hot.parquet     同花顺人气榜（最近有数据的交易日）
+  raw_recent.parquet        最近 N 个交易日全市场原始日线（含换手率，沪深主板）
+  adj_recent.parquet        最近 N 个交易日复权因子
+  valuation_recent.parquet  最近 N 个交易日估值日频（PE/PB/PS/股息率/市值；
+                            与换手率同一 daily_basic 响应，零新增调用量）
+  meta.parquet              代码->名称
+  company.parquet           公司信息（stock_basic + stock_company）
+  ths_hot.parquet           同花顺人气榜（最近有数据的交易日）
 
 用法（runner）：
   uv run --no-project --with tushare --with pandas --with pyarrow --with numpy \
@@ -58,24 +60,28 @@ def main() -> None:
     days = _recent_days(args.days)
     print(f"[fetch_all] 最近交易日：{days}")
 
-    raw_all, adj_all = [], []
+    raw_all, adj_all, val_all = [], [], []
     for d in days:
         raw = _mainboard(tsc.fetch_daily_by_date(d))
-        turn = _mainboard(tsc.fetch_turnover_by_date(d))
+        basic = _mainboard(tsc.fetch_daily_basic_by_date(d))  # 换手率 + 估值，同一响应双用
         fac = _mainboard(tsc.fetch_adj_factor_by_date(d))
         if not raw.empty:
-            if not turn.empty:
-                raw = raw.merge(turn[["code", "turn"]], on="code", how="left")
+            if not basic.empty:
+                raw = raw.merge(basic[["code", "turn"]], on="code", how="left")
             else:
                 raw = raw.assign(turn=pd.NA)
             raw_all.append(raw)
+        if not basic.empty:
+            val_all.append(basic[["code", "date", *tsc.VALUATION_METRIC_COLUMNS]])
         if not fac.empty:
             adj_all.append(fac)
 
     raw_df = pd.concat(raw_all, ignore_index=True) if raw_all else pd.DataFrame()
     adj_df = pd.concat(adj_all, ignore_index=True) if adj_all else pd.DataFrame()
+    val_df = pd.concat(val_all, ignore_index=True) if val_all else pd.DataFrame()
     raw_df.to_parquet(f"{od}/raw_recent.parquet", index=False)
     adj_df.to_parquet(f"{od}/adj_recent.parquet", index=False)
+    val_df.to_parquet(f"{od}/valuation_recent.parquet", index=False)
 
     # 公司信息 + 名称
     try:
@@ -112,7 +118,7 @@ def main() -> None:
     hot.to_parquet(f"{od}/ths_hot.parquet", index=False)
 
     print(
-        f"[fetch_all] raw={len(raw_df)} adj={len(adj_df)} "
+        f"[fetch_all] raw={len(raw_df)} adj={len(adj_df)} valuation={len(val_df)} "
         f"company={len(comp)} meta={len(meta)} hot={len(hot)} delisted={len(delisted)} -> {os.path.abspath(od)}"
     )
 

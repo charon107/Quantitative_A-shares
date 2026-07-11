@@ -1,9 +1,11 @@
 name: 基本面财务刷新 + 逐年选股
 
-# 财务数据变动频率低（年报 4 月、半年报 8 月、三季报 10 月披露），无需每日抓。
-# runner 抓 fina_indicator/income/cashflow/index_daily -> parquet，scp 到服务器，
-# 服务器 upsert stock_fundamental/index_daily -> 跑逐年选股写 selected_stocks。
-# 与每日日线入库（daily_ingest.yml）解耦，避免给日线链路增加限频压力。
+# 财务数据变动频率低（年报+一季报 4 月、半年报 8 月、三季报 10 月披露），无需每日抓。
+# runner 抓 fina_indicator/income/cashflow/balancesheet（全部报告期，年度+季度双组装）
+# + dividend/forecast/express + index_daily -> parquet，scp 到服务器，
+# 服务器 upsert stock_fundamental(_quarterly)/dividend/forecast/express/index_daily
+# -> 跑逐年选股写 selected_stocks。现行 cron 均落在季报法定披露期限之后，
+# 季度数据一并刷新。与每日日线入库（daily_ingest.yml）解耦，避免限频压力。
 on:
   schedule:
     - cron: "23 1 5 5,9,11 *"   # 财报季次月上旬各跑一次（北京 09:23 前后）
@@ -21,8 +23,9 @@ concurrency:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    # 每股 4 次调用（fina/income/cashflow/balancesheet），3200 只 @90次/分 ≈ 143 分钟
-    timeout-minutes: 240
+    # 每股 7 次调用（fina/income/cashflow/balancesheet/dividend/forecast/express），
+    # 3200 只 @90次/分 ≈ 249 分钟
+    timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5

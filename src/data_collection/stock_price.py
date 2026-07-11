@@ -142,28 +142,33 @@ def _trip_fatal_breaker(state: dict, error_msg: str):
 # 抓取
 # =========================
 def fetch_market_snapshot(trade_date: str):
-    """拉某交易日全市场原始价 + 换手率（合并）与复权因子（单独）。"""
+    """拉某交易日全市场原始价 + 每日指标（换手率并入日线、估值单独成帧）与复权因子。"""
     raw = tsc.fetch_daily_by_date(trade_date)
-    turn = tsc.fetch_turnover_by_date(trade_date)
+    basic = tsc.fetch_daily_basic_by_date(trade_date)  # 换手率 + 估值，同一响应双用
     factor = tsc.fetch_adj_factor_by_date(trade_date)
 
     raw = filter_mainboard(raw) if not raw.empty else raw
-    turn = filter_mainboard(turn) if not turn.empty else turn
+    basic = filter_mainboard(basic) if not basic.empty else basic
     factor = filter_mainboard(factor) if not factor.empty else factor
 
     if not raw.empty:
-        raw = raw.merge(turn[["code", "turn"]], on="code", how="left") if not turn.empty else raw.assign(turn=pd.NA)
-    return raw, factor
+        raw = raw.merge(basic[["code", "turn"]], on="code", how="left") if not basic.empty else raw.assign(turn=pd.NA)
+    valuation = (
+        basic[["code", "date", *tsc.VALUATION_METRIC_COLUMNS]] if not basic.empty else pd.DataFrame()
+    )
+    return raw, factor, valuation
 
 
-def _backfill_new_listing(code: str, raw_rows_by_code: dict, factor_rows_by_code: dict):
+def _backfill_new_listing(code: str, raw_rows_by_code: dict, factor_rows_by_code: dict, valuation_rows_by_code: dict):
     """全新股票：单股全量回补一次。"""
     raw_hist = tsc.fetch_daily_raw(code, START_DATE, "")
     factor_hist = tsc.fetch_adj_factor_series(code, START_DATE, "")
     if not raw_hist.empty:
-        turn_hist = tsc.fetch_turnover(code, START_DATE, "")
-        if not turn_hist.empty:
-            raw_hist = raw_hist.merge(turn_hist, on="date", how="left")
+        basic_hist = tsc.fetch_daily_basic_series(code, START_DATE, "")
+        if not basic_hist.empty:
+            raw_hist = raw_hist.merge(basic_hist[["date", "turn"]], on="date", how="left")
+            val = basic_hist.drop(columns=["turn"]).assign(code=code)
+            valuation_rows_by_code[code].append(val)
         else:
             raw_hist["turn"] = pd.NA
         raw_hist["code"] = code
@@ -199,19 +204,22 @@ def existing_raw_codes() -> set[str]:
         return set()
 
 
-def persist(stock_df, raw_rows_by_code, factor_rows_by_code, delisted=None) -> dict:
+def persist(stock_df, raw_rows_by_code, factor_rows_by_code, delisted=None, valuation_rows_by_code=None) -> dict:
     """把新抓取的数据写入 DuckDB，按 code 重算 qfq，刷新 stock_meta，清理退市股。返回统计。"""
     conn, tmp, dest = _open_write_copy()
     stats = {"UPDATED": 0, "EMPTY": 0, "ERROR": 0, "PURGED": 0}
     errors: list[tuple[str, str]] = []
     try:
-        # 1) 原始价 + 复权因子入库
+        # 1) 原始价 + 复权因子 + 估值日频入库
         for code, chunks in raw_rows_by_code.items():
             if chunks:
                 db.upsert_raw(pd.concat(chunks, ignore_index=True), conn)
         for code, chunks in factor_rows_by_code.items():
             if chunks:
                 db.upsert_adj(pd.concat(chunks, ignore_index=True), conn)
+        for code, chunks in (valuation_rows_by_code or {}).items():
+            if chunks:
+                db.upsert_valuation_daily(pd.concat(chunks, ignore_index=True), conn)
 
         # 2) 受影响的 code 重算前复权写 kline
         touched = sorted(set(raw_rows_by_code) | set(factor_rows_by_code))
@@ -301,12 +309,13 @@ def main():
 
     raw_rows_by_code: dict[str, list] = defaultdict(list)
     factor_rows_by_code: dict[str, list] = defaultdict(list)
+    valuation_rows_by_code: dict[str, list] = defaultdict(list)
     actual_last_date = None
 
     # 按交易日批量拉全市场
     try:
         for d in tqdm(needed_dates, desc="Fetching market snapshots"):
-            raw, factor = fetch_market_snapshot(d)
+            raw, factor, valuation = fetch_market_snapshot(d)
             if raw.empty:
                 print(f"[Warn] {d} 暂无日线（可能未发布），跳过。")
                 continue
@@ -315,6 +324,9 @@ def main():
             if not factor.empty:
                 for code, group in factor.groupby("code"):
                     factor_rows_by_code[code].append(group)
+            if not valuation.empty:
+                for code, group in valuation.groupby("code"):
+                    valuation_rows_by_code[code].append(group)
             actual_last_date = d
     except tsc.TushareFatalError as e:
         _trip_fatal_breaker(state, str(e))
@@ -325,14 +337,15 @@ def main():
     new_codes = [c for c in codes if c not in have and c not in raw_rows_by_code]
     for code in tqdm(new_codes, desc="Backfilling brand-new listings"):
         try:
-            _backfill_new_listing(code, raw_rows_by_code, factor_rows_by_code)
+            _backfill_new_listing(code, raw_rows_by_code, factor_rows_by_code, valuation_rows_by_code)
         except tsc.TushareFatalError as e:
             _trip_fatal_breaker(state, str(e))
             sys.exit(1)
         except Exception:
             pass
 
-    stats = persist(stock_df, raw_rows_by_code, factor_rows_by_code, delisted)
+    stats = persist(stock_df, raw_rows_by_code, factor_rows_by_code, delisted,
+                    valuation_rows_by_code=valuation_rows_by_code)
 
     if actual_last_date:
         state["last_complete_date"] = actual_last_date

@@ -5,7 +5,11 @@ import { Card, CardHeader } from "../components/Card";
 import { KpiCard } from "../components/KpiCard";
 import { ErrorState, Loading } from "../components/States";
 import { CompanyInfoPanel } from "../components/CompanyInfoPanel";
+import { DividendPanel } from "../components/DividendPanel";
+import { EarningsPanel } from "../components/EarningsPanel";
+import { FundamentalPanel } from "../components/FundamentalPanel";
 import { RangeStatsPanel } from "../components/RangeStatsPanel";
+import { ValuationPanel } from "../components/ValuationPanel";
 import { FullscreenOverlay } from "../components/FullscreenOverlay";
 import { HotStocks } from "../components/HotStocks";
 import { KlineChart } from "../charts/KlineChart";
@@ -132,6 +136,11 @@ export function StockQuery({
       {code && rangeStats && (
         <RangeStatsPanel stats={rangeStats} onClose={() => setRangeStats(null)} />
       )}
+
+      {code && <FundamentalPanel code={code} />}
+      {code && <ValuationPanel code={code} />}
+      {code && <EarningsPanel code={code} />}
+      {code && <DividendPanel code={code} />}
 
       {code && fullscreen && (
         <FullscreenOverlay onClose={() => setFullscreen(false)}>

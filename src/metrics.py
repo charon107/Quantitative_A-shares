@@ -163,6 +163,42 @@ def company_info_df(code: str, path: str | None = None) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+# ========== 个股财务扩展（季度基本面 / 估值日频 / 分红 / 业绩预告与快报） ==========
+def _per_code_table(table: str, code: str, order_by: str, path: str | None = None) -> pd.DataFrame:
+    """单只股票按主键查一张表（升序）。表不存在/无数据返回空 DataFrame（前端整卡隐藏）。"""
+    try:
+        return db.query_df(
+            f"SELECT * FROM {table} WHERE code = ? ORDER BY {order_by}", [code], path=path
+        )
+    except Exception:
+        return pd.DataFrame()
+
+
+def quarterly_fundamental(code: str, path: str | None = None) -> pd.DataFrame:
+    """单只股票季度基本面（按报告期升序，列见 db.QUARTERLY_FUNDAMENTAL_COLUMNS）。"""
+    return _per_code_table("stock_fundamental_quarterly", code, "end_date", path=path)
+
+
+def valuation_daily(code: str, path: str | None = None) -> pd.DataFrame:
+    """单只股票估值日频（PE/PB/PS/股息率/市值，按日期升序）。"""
+    return _per_code_table("stock_valuation_daily", code, "date", path=path)
+
+
+def dividend_history(code: str, path: str | None = None) -> pd.DataFrame:
+    """单只股票分红送股历史（已实施，按分红年度升序）。"""
+    return _per_code_table("stock_dividend", code, "end_date", path=path)
+
+
+def forecast_history(code: str, path: str | None = None) -> pd.DataFrame:
+    """单只股票业绩预告历史（按报告期+公告日升序）。"""
+    return _per_code_table("stock_forecast", code, "end_date, ann_date", path=path)
+
+
+def express_history(code: str, path: str | None = None) -> pd.DataFrame:
+    """单只股票业绩快报历史（按报告期升序）。"""
+    return _per_code_table("stock_express", code, "end_date", path=path)
+
+
 def hot_stocks(limit: int = 12, path: str | None = None) -> pd.DataFrame:
     """同花顺人气榜（按人气排名升序）。表不存在/无数据返回空 DataFrame。"""
     try:

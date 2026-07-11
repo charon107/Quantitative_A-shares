@@ -158,6 +158,113 @@ export interface ScreeningRow {
   net_profit: number | null;
 }
 
+// 季度基本面单期。比率为小数、金额为元；q_ 前缀为单季口径（差分预计算，Q1=累计）
+export interface QuarterlyFundamentalPoint {
+  end_date: string;
+  year: number;
+  quarter: number;
+  ann_date: string | null;
+  roe: number | null;
+  roe_dt: number | null;
+  roa: number | null;
+  netprofit_margin: number | null;
+  grossprofit_margin: number | null;
+  net_profit: number | null;
+  profit_dedt: number | null;
+  revenue: number | null;
+  eps: number | null;
+  bps: number | null;
+  debt_to_assets: number | null;
+  or_yoy: number | null;
+  netprofit_yoy: number | null;
+  dt_netprofit_yoy: number | null;
+  cfo: number | null;
+  total_assets: number | null;
+  total_liab: number | null;
+  q_roe: number | null;
+  q_dt_roe: number | null;
+  q_netprofit_margin: number | null;
+  q_gsprofit_margin: number | null;
+  q_net_profit: number | null;
+  q_revenue: number | null;
+  q_cfo: number | null;
+  q_sales_yoy: number | null;
+  q_sales_qoq: number | null;
+  q_netprofit_yoy: number | null;
+  q_netprofit_qoq: number | null;
+}
+
+export interface QuarterlyFundamental {
+  code: string;
+  code_name: string | null;
+  points: QuarterlyFundamentalPoint[];
+}
+
+// 估值日频单日。total_mv/circ_mv 万元、dv_* 百分数（tushare 原单位）
+export interface ValuationPoint {
+  date: string;
+  pe: number | null;
+  pe_ttm: number | null;
+  pb: number | null;
+  ps: number | null;
+  ps_ttm: number | null;
+  dv_ratio: number | null;
+  dv_ttm: number | null;
+  total_mv: number | null;
+  circ_mv: number | null;
+}
+
+export interface Valuation {
+  code: string;
+  code_name: string | null;
+  points: ValuationPoint[];
+}
+
+// 分红送股（已实施）。stk_div 每股送转股；cash_div 税后/cash_div_tax 税前 每股分红元
+export interface DividendRow {
+  end_date: string;
+  ann_date: string | null;
+  stk_div: number | null;
+  cash_div: number | null;
+  cash_div_tax: number | null;
+  record_date: string | null;
+  ex_date: string | null;
+  pay_date: string | null;
+}
+
+// 业绩预告。p_change 为小数；net_profit_min/max 元
+export interface ForecastRow {
+  end_date: string;
+  ann_date: string;
+  type: string | null;
+  p_change_min: number | null;
+  p_change_max: number | null;
+  net_profit_min: number | null;
+  net_profit_max: number | null;
+  change_reason: string | null;
+}
+
+// 业绩快报。金额元；diluted_roe/yoy_* 为小数
+export interface ExpressRow {
+  end_date: string;
+  ann_date: string | null;
+  revenue: number | null;
+  operate_profit: number | null;
+  n_income: number | null;
+  diluted_eps: number | null;
+  bps: number | null;
+  diluted_roe: number | null;
+  yoy_sales: number | null;
+  yoy_dedu_np: number | null;
+}
+
+export interface EarningsNews {
+  code: string;
+  code_name: string | null;
+  forecasts: ForecastRow[];
+  express: ExpressRow[];
+}
+
 export interface ChartLinePoint {
   date: string;
   close: number | null;

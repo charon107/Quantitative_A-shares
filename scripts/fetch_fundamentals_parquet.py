@@ -1,14 +1,20 @@
 """在 runner（境外，直连 tushare 代理稳定）抓取基本面财务 + 指数日线，存为 parquet。
 
 随后由 workflow scp 到服务器，服务器用 load_fundamentals.py 只做 DB 活（入库 + 跑选股）。
-财务数据按年报口径逐股抓取（fina_indicator 一次拿全部报告期），变动频率低，
+财务数据逐股抓取（每股 7 次调用：四张报表 raw + 分红 + 业绩预告 + 业绩快报；
+四张报表一次拿全部报告期，同一响应双喂年度/季度组装），变动频率低，
 默认一次性全历史回填；财报季用 --years 增量刷新最近若干年即可。
 
 产出（--outdir 下）：
-  fundamental.parquet  全市场年报财务（code/year/ann_date/roe/netprofit_yoy/
-                       debt_ratio/net_profit/cfo；debt_ratio=总债务/总资产，
-                       总债务=短期借款+长期借款+应付债券）
-  index.parquet        指数日线收盘（默认上证综指 sh.000001；code/date/close）
+  fundamental.parquet            全市场年报财务（code/year/ann_date/roe/netprofit_yoy/
+                                 debt_ratio/net_profit/cfo；debt_ratio=总债务/总资产，
+                                 总债务=短期借款+长期借款+应付债券；选股用）
+  fundamental_quarterly.parquet  全市场季度基本面宽表（累计+单季双口径，展示用，
+                                 列见 tushare_client.QUARTERLY_METRIC_COLUMNS）
+  dividend.parquet               分红送股（已实施）
+  forecast.parquet               业绩预告
+  express.parquet                业绩快报
+  index.parquet                  指数日线收盘（默认上证综指 sh.000001；code/date/close）
 
 用法（runner）：
   uv run --no-project --with tushare --with pandas --with pyarrow --with numpy \
@@ -59,14 +65,35 @@ def _mainboard_codes() -> list[str]:
     return codes[codes.str.match(_MB, na=False)].tolist()
 
 
-def _fetch_one(code: str) -> pd.DataFrame:
-    """拼装单只股票的年报财务宽表（fina/income/cashflow/balancesheet 四表按 year 外连接，
-    fina 缺失年份用报表推算，见 assemble_annual_fundamental）。"""
-    fina = tsc.fetch_fina_indicator(code)
-    inc = tsc.fetch_income(code)
-    cf = tsc.fetch_cashflow(code)
-    bal = tsc.fetch_balancesheet(code)
-    return tsc.assemble_annual_fundamental(code, fina, inc, cf, bal)
+# 产物集合：(键, parts 子目录, 合并输出文件名)。parts 子目录用于逐股断点续传，
+# 五个目录都有该股占位文件才算抓完（老产物只有 parts/ 时会重抓该股，安全）。
+_PART_SPECS = (
+    ("annual", "parts", "fundamental.parquet"),
+    ("quarterly", "parts_q", "fundamental_quarterly.parquet"),
+    ("dividend", "parts_div", "dividend.parquet"),
+    ("forecast", "parts_fc", "forecast.parquet"),
+    ("express", "parts_exp", "express.parquet"),
+)
+
+
+def _fetch_one(code: str) -> dict[str, pd.DataFrame]:
+    """一次抓齐单只股票的全部财务产物（7 次 API 调用）。
+
+    四张报表 raw 各拉一次（全部报告期），同一响应双喂年度/季度组装（零新增调用量）；
+    另拉分红/业绩预告/业绩快报各一次。fina 缺失报告期用报表推算，
+    见 assemble_annual_fundamental / assemble_quarterly_fundamental。
+    """
+    fina = tsc.fetch_fina_raw(code)
+    inc = tsc.fetch_income_raw(code)
+    cf = tsc.fetch_cashflow_raw(code)
+    bal = tsc.fetch_balancesheet_raw(code)
+    return {
+        "annual": tsc.assemble_annual_from_raw(code, fina, inc, cf, bal),
+        "quarterly": tsc.assemble_quarterly_fundamental(code, fina, inc, cf, bal),
+        "dividend": tsc.fetch_dividend(code),
+        "forecast": tsc.fetch_forecast(code),
+        "express": tsc.fetch_express(code),
+    }
 
 
 def main() -> None:
@@ -85,10 +112,15 @@ def main() -> None:
     total = len(codes)
     print(f"[fetch_fund] 主板股票 {total} 只")
 
-    # 逐股落盘到 parts/，进程中断后重跑可跳过已抓的（断点续传）
-    parts_dir = os.path.join(od, "parts")
-    os.makedirs(parts_dir, exist_ok=True)
-    done = {fn[:-8] for fn in os.listdir(parts_dir) if fn.endswith(".parquet")}
+    # 逐股落盘到各 parts 子目录，进程中断后重跑可跳过已抓的（断点续传）
+    parts_dirs = {key: os.path.join(od, sub) for key, sub, _ in _PART_SPECS}
+    for pd_dir in parts_dirs.values():
+        os.makedirs(pd_dir, exist_ok=True)
+
+    def _codes_in(pd_dir: str) -> set[str]:
+        return {fn[:-8] for fn in os.listdir(pd_dir) if fn.endswith(".parquet")}
+
+    done = set.intersection(*(_codes_in(pd_dir) for pd_dir in parts_dirs.values()))
     if done:
         print(f"[fetch_fund] 续传：已有 {len(done)} 只，跳过")
 
@@ -96,10 +128,11 @@ def main() -> None:
     tsc.configure_rate_limiter(threading.Lock(), _NextAllowed())
 
     def _fetch_and_save(code: str) -> None:
-        df = _fetch_one(code)
+        frames = _fetch_one(code)
         # 空结果也占位，避免重跑时反复请求无数据的股票
-        out = df if not df.empty else pd.DataFrame()
-        out.to_parquet(os.path.join(parts_dir, f"{code}.parquet"), index=False)
+        for key in parts_dirs:
+            out = frames[key] if not frames[key].empty else pd.DataFrame()
+            out.to_parquet(os.path.join(parts_dirs[key], f"{code}.parquet"), index=False)
 
     todo = [c for c in codes if c not in done]
     print(f"[fetch_fund] 并发 {WORKERS} 线程，全局限速 {tsc.MAX_CALLS_PER_MIN * 0.9:.0f} 次/分")
@@ -128,19 +161,21 @@ def main() -> None:
     if bar:
         bar.close()
 
-    frames = []
-    for fn in sorted(os.listdir(parts_dir)):
-        if fn.endswith(".parquet"):
-            part = pd.read_parquet(os.path.join(parts_dir, fn))
-            if not part.empty:
-                frames.append(part)
-    fund = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(
-        columns=["code", "year", "ann_date", "roe", "netprofit_yoy", "debt_ratio", "net_profit", "cfo"]
-    )
-    if args.years and not fund.empty:
-        max_year = int(pd.to_numeric(fund["year"], errors="coerce").max())
-        fund = fund[fund["year"] >= max_year - args.years + 1]
-    fund.to_parquet(f"{od}/fundamental.parquet", index=False)
+    counts: dict[str, int] = {}
+    for key, _sub, out_name in _PART_SPECS:
+        frames = []
+        for fn in sorted(os.listdir(parts_dirs[key])):
+            if fn.endswith(".parquet"):
+                part = pd.read_parquet(os.path.join(parts_dirs[key], fn))
+                if not part.empty:
+                    frames.append(part)
+        merged = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+        # --years 只作用于按 year 组织的年度/季度帧（分红/预告/快报数据量小，保留全量）
+        if args.years and not merged.empty and "year" in merged.columns:
+            max_year = int(pd.to_numeric(merged["year"], errors="coerce").max())
+            merged = merged[merged["year"] >= max_year - args.years + 1]
+        merged.to_parquet(f"{od}/{out_name}", index=False)
+        counts[key] = len(merged)
 
     # 指数日线（全历史）
     try:
@@ -150,7 +185,8 @@ def main() -> None:
         idx = pd.DataFrame(columns=["code", "date", "close"])
     idx.to_parquet(f"{od}/index.parquet", index=False)
 
-    print(f"[fetch_fund] fundamental={len(fund)} index={len(idx)} -> {os.path.abspath(od)}")
+    summary = " ".join(f"{key}={n}" for key, n in counts.items())
+    print(f"[fetch_fund] {summary} index={len(idx)} -> {os.path.abspath(od)}")
 
 
 if __name__ == "__main__":

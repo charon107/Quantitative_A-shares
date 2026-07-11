@@ -42,3 +42,39 @@ def company_info(code: str):
         raise HTTPException(status_code=404, detail=f"无公司信息：{code}")
     rec = df_to_records(df, date_cols=())[0]
     return schemas.CompanyInfo(**rec)
+
+
+# 以下财务扩展接口无数据时返回 200 + 空列表（前端整卡静默隐藏，避免 404 噪音）。
+# 直连 DuckDB 不走 Redis（单 code 主键查询毫秒级，客户端 react-query 缓存即可）。
+@router.get("/{code}/fundamental/quarterly", response_model=schemas.QuarterlyFundamental)
+def fundamental_quarterly(code: str):
+    df = metrics.quarterly_fundamental(code)
+    nm = services.name_map()
+    return schemas.QuarterlyFundamental(
+        code=code, code_name=nm.get(code), points=df_to_records(df, date_cols=())
+    )
+
+
+@router.get("/{code}/valuation", response_model=schemas.Valuation)
+def valuation(code: str):
+    df = metrics.valuation_daily(code)
+    nm = services.name_map()
+    return schemas.Valuation(
+        code=code, code_name=nm.get(code), points=df_to_records(df, date_cols=("date",))
+    )
+
+
+@router.get("/{code}/dividend", response_model=list[schemas.DividendRow])
+def dividend(code: str):
+    return df_to_records(metrics.dividend_history(code), date_cols=())
+
+
+@router.get("/{code}/earnings", response_model=schemas.EarningsNews)
+def earnings(code: str):
+    nm = services.name_map()
+    return schemas.EarningsNews(
+        code=code,
+        code_name=nm.get(code),
+        forecasts=df_to_records(metrics.forecast_history(code), date_cols=()),
+        express=df_to_records(metrics.express_history(code), date_cols=()),
+    )

@@ -58,6 +58,39 @@ FUNDAMENTAL_COLUMNS = [
 ]
 # 逐年回测选股池（来自 fundamental_screen.run_selection）
 SELECTED_COLUMNS = ["year", "code", "code_name"]
+# 季度基本面（展示用；与 tushare_client.QUARTERLY_METRIC_COLUMNS 的指标部分保持一致，
+# 有单测守护两者同步）。累计(YTD)列与 q_ 单季列并存，q_net_profit/q_revenue/q_cfo
+# 由采集层差分预计算（Q1=累计）；比率为小数，金额为元
+QUARTERLY_FUNDAMENTAL_COLUMNS = [
+    "code", "end_date", "year", "quarter", "ann_date",
+    "roe", "roe_dt", "roa", "netprofit_margin", "grossprofit_margin",
+    "net_profit", "profit_dedt", "revenue", "eps", "bps", "debt_to_assets",
+    "or_yoy", "netprofit_yoy", "dt_netprofit_yoy", "cfo",
+    "total_assets", "total_liab",
+    "q_roe", "q_dt_roe", "q_netprofit_margin", "q_gsprofit_margin",
+    "q_net_profit", "q_revenue", "q_cfo",
+    "q_sales_yoy", "q_sales_qoq", "q_netprofit_yoy", "q_netprofit_qoq",
+]
+# 估值日频（daily_basic；total_mv/circ_mv 万元、dv_* 百分数，按 tushare 原单位入库）
+VALUATION_COLUMNS = [
+    "code", "date", "pe", "pe_ttm", "pb", "ps", "ps_ttm",
+    "dv_ratio", "dv_ttm", "total_mv", "circ_mv",
+]
+# 分红送股（已实施；cash_div 税后/cash_div_tax 税前 每股分红元，stk_div 每股送转股）
+DIVIDEND_TABLE_COLUMNS = [
+    "code", "end_date", "ann_date", "div_proc", "stk_div", "cash_div", "cash_div_tax",
+    "record_date", "ex_date", "pay_date",
+]
+# 业绩预告（p_change ÷100 归一小数；net_profit_min/max 元）
+FORECAST_TABLE_COLUMNS = [
+    "code", "end_date", "ann_date", "type", "p_change_min", "p_change_max",
+    "net_profit_min", "net_profit_max", "change_reason",
+]
+# 业绩快报（金额元；diluted_roe/yoy_* ÷100 归一小数）
+EXPRESS_TABLE_COLUMNS = [
+    "code", "end_date", "ann_date", "revenue", "operate_profit", "total_profit", "n_income",
+    "diluted_eps", "bps", "diluted_roe", "yoy_sales", "yoy_op", "yoy_dedu_np",
+]
 
 SCHEMA_SQL = """
 -- 元信息键值表（schema_version 等）
@@ -172,6 +205,108 @@ CREATE TABLE IF NOT EXISTS selected_stocks (
     code_name VARCHAR,
     PRIMARY KEY (year, code)
 );
+
+-- 季度基本面（展示用；选股仍用年度表 stock_fundamental，两表独立）。
+-- 比率已在采集层 ÷100 归一为小数，金额为元；q_ 前缀为单季口径（差分预计算，Q1=累计）
+CREATE TABLE IF NOT EXISTS stock_fundamental_quarterly (
+    code               VARCHAR NOT NULL,
+    end_date           VARCHAR NOT NULL,  -- 报告期末 'YYYY-MM-DD'
+    year               INTEGER NOT NULL,
+    quarter            TINYINT NOT NULL,  -- 1..4
+    ann_date           VARCHAR,
+    roe                FLOAT,
+    roe_dt             FLOAT,
+    roa                FLOAT,
+    netprofit_margin   FLOAT,
+    grossprofit_margin FLOAT,
+    net_profit         DOUBLE,
+    profit_dedt        DOUBLE,
+    revenue            DOUBLE,
+    eps                FLOAT,
+    bps                FLOAT,
+    debt_to_assets     FLOAT,
+    or_yoy             FLOAT,
+    netprofit_yoy      FLOAT,
+    dt_netprofit_yoy   FLOAT,
+    cfo                DOUBLE,
+    total_assets       DOUBLE,
+    total_liab         DOUBLE,
+    q_roe              FLOAT,
+    q_dt_roe           FLOAT,
+    q_netprofit_margin FLOAT,
+    q_gsprofit_margin  FLOAT,
+    q_net_profit       DOUBLE,
+    q_revenue          DOUBLE,
+    q_cfo              DOUBLE,
+    q_sales_yoy        FLOAT,
+    q_sales_qoq        FLOAT,
+    q_netprofit_yoy    FLOAT,
+    q_netprofit_qoq    FLOAT,
+    PRIMARY KEY (code, end_date)
+);
+
+-- 估值日频（daily_basic：PE/PB/PS/股息率/市值；total_mv/circ_mv 万元、dv_* 百分数）
+CREATE TABLE IF NOT EXISTS stock_valuation_daily (
+    code     VARCHAR NOT NULL,
+    date     DATE    NOT NULL,
+    pe       FLOAT,
+    pe_ttm   FLOAT,
+    pb       FLOAT,
+    ps       FLOAT,
+    ps_ttm   FLOAT,
+    dv_ratio FLOAT,
+    dv_ttm   FLOAT,
+    total_mv DOUBLE,
+    circ_mv  DOUBLE,
+    PRIMARY KEY (code, date)
+);
+
+-- 分红送股（仅已实施；end_date 为分红年度报告期，中期分红为 06-30 等）
+CREATE TABLE IF NOT EXISTS stock_dividend (
+    code         VARCHAR NOT NULL,
+    end_date     VARCHAR NOT NULL,
+    ann_date     VARCHAR,
+    div_proc     VARCHAR,
+    stk_div      FLOAT,   -- 每股送转（股）
+    cash_div     FLOAT,   -- 每股分红·税后（元）
+    cash_div_tax FLOAT,   -- 每股分红·税前（元）
+    record_date  VARCHAR,
+    ex_date      VARCHAR,
+    pay_date     VARCHAR,
+    PRIMARY KEY (code, end_date)
+);
+
+-- 业绩预告（同一报告期多次修正预告按公告日区分保留）
+CREATE TABLE IF NOT EXISTS stock_forecast (
+    code           VARCHAR NOT NULL,
+    end_date       VARCHAR NOT NULL,
+    ann_date       VARCHAR NOT NULL,
+    type           VARCHAR,  -- 预增/预减/扭亏/首亏/续亏/续盈/略增/略减
+    p_change_min   FLOAT,    -- 预告净利润变动幅度下限（小数）
+    p_change_max   FLOAT,
+    net_profit_min DOUBLE,   -- 预告净利润下限（元）
+    net_profit_max DOUBLE,
+    change_reason  VARCHAR,
+    PRIMARY KEY (code, end_date, ann_date)
+);
+
+-- 业绩快报（正式财报前的先行数据；金额元，比率小数）
+CREATE TABLE IF NOT EXISTS stock_express (
+    code           VARCHAR NOT NULL,
+    end_date       VARCHAR NOT NULL,
+    ann_date       VARCHAR,
+    revenue        DOUBLE,
+    operate_profit DOUBLE,
+    total_profit   DOUBLE,
+    n_income       DOUBLE,
+    diluted_eps    FLOAT,
+    bps            FLOAT,
+    diluted_roe    FLOAT,
+    yoy_sales      FLOAT,
+    yoy_op         FLOAT,
+    yoy_dedu_np    FLOAT,
+    PRIMARY KEY (code, end_date)
+);
 """
 
 
@@ -211,6 +346,27 @@ def database_exists(path: str | None = None) -> bool:
 
 
 # ========== 写入（入库侧使用） ==========
+def acquire_ingest_lock(path: str | None = None):
+    """入库互斥锁：防止多个「copy 生产库 → 写临时库 → swap」进程并发互踩丢数据
+    （load_all/load_fundamentals/load_valuation 共用同一把锁）。进程退出自动释放。
+
+    非阻塞：已被占用时直接 SystemExit（workflow 失败可重跑，比静默丢写入安全）。
+    Linux（服务器）用 flock；Windows（本地开发）无 fcntl，跳过。
+    """
+    try:
+        import fcntl
+    except ImportError:
+        return None
+    lock_path = path or (DUCKDB_PATH + ".ingest.lock")
+    fh = open(lock_path, "w")
+    try:
+        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        fh.close()
+        raise SystemExit(f"[db] 已有入库进程在运行（{lock_path} 被锁），本次退出")
+    return fh
+
+
 def init_schema(conn: duckdb.DuckDBPyConnection) -> None:
     """在给定（读写）连接上建表与索引（幂等）。"""
     conn.execute(SCHEMA_SQL)
@@ -388,6 +544,66 @@ def upsert_fundamental(df: pd.DataFrame, conn: duckdb.DuckDBPyConnection) -> int
     return len(frame)
 
 
+def _upsert_generic(
+    table: str,
+    columns: list[str],
+    key_cols: list[str],
+    df: pd.DataFrame,
+    conn: duckdb.DuckDBPyConnection,
+    date_cols: tuple[str, ...] = (),
+) -> int:
+    """按主键 INSERT OR REPLACE 的通用 upsert：缺失列补 NULL、键列去空去重、
+    date_cols 显式 CAST 为 DATE。返回写入行数。"""
+    if df is None or df.empty or "code" not in df.columns:
+        return 0
+    frame = df.copy()
+    for col in columns:
+        if col not in frame.columns:
+            frame[col] = pd.NA
+    frame = frame[columns].dropna(subset=key_cols).drop_duplicates(key_cols)
+    reg = f"_{table}_in"
+    conn.register(reg, frame)
+    select_cols = ", ".join(
+        f"CAST({c} AS DATE) AS {c}" if c in date_cols else c for c in columns
+    )
+    conn.execute(
+        f"INSERT OR REPLACE INTO {table} ({', '.join(columns)}) SELECT {select_cols} FROM {reg}"
+    )
+    conn.unregister(reg)
+    return len(frame)
+
+
+def upsert_fundamental_quarterly(df: pd.DataFrame, conn: duckdb.DuckDBPyConnection) -> int:
+    """按 (code, end_date) UPSERT 季度基本面。缺失列补 NULL。"""
+    return _upsert_generic(
+        "stock_fundamental_quarterly", QUARTERLY_FUNDAMENTAL_COLUMNS, ["code", "end_date"], df, conn
+    )
+
+
+def upsert_valuation_daily(df: pd.DataFrame, conn: duckdb.DuckDBPyConnection) -> int:
+    """按 (code, date) UPSERT 估值日频。缺失列补 NULL。"""
+    return _upsert_generic(
+        "stock_valuation_daily", VALUATION_COLUMNS, ["code", "date"], df, conn, date_cols=("date",)
+    )
+
+
+def upsert_dividend(df: pd.DataFrame, conn: duckdb.DuckDBPyConnection) -> int:
+    """按 (code, end_date) UPSERT 分红送股（已实施）。缺失列补 NULL。"""
+    return _upsert_generic("stock_dividend", DIVIDEND_TABLE_COLUMNS, ["code", "end_date"], df, conn)
+
+
+def upsert_forecast(df: pd.DataFrame, conn: duckdb.DuckDBPyConnection) -> int:
+    """按 (code, end_date, ann_date) UPSERT 业绩预告。缺失列补 NULL。"""
+    return _upsert_generic(
+        "stock_forecast", FORECAST_TABLE_COLUMNS, ["code", "end_date", "ann_date"], df, conn
+    )
+
+
+def upsert_express(df: pd.DataFrame, conn: duckdb.DuckDBPyConnection) -> int:
+    """按 (code, end_date) UPSERT 业绩快报。缺失列补 NULL。"""
+    return _upsert_generic("stock_express", EXPRESS_TABLE_COLUMNS, ["code", "end_date"], df, conn)
+
+
 def upsert_index_daily(df: pd.DataFrame, conn: duckdb.DuckDBPyConnection) -> int:
     """按 (code, date) UPSERT 指数日线。期望列 code/date/close。"""
     if df is None or df.empty:
@@ -425,6 +641,8 @@ def replace_selected_stocks(df: pd.DataFrame, conn: duckdb.DuckDBPyConnection) -
 PURGE_TABLES = (
     "kline", "raw_kline", "adj_factor", "stock_meta", "stock_info",
     "ths_hot", "stock_fundamental", "selected_stocks",
+    "stock_fundamental_quarterly", "stock_valuation_daily",
+    "stock_dividend", "stock_forecast", "stock_express",
 )
 
 

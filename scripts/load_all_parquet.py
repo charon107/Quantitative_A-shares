@@ -1,8 +1,9 @@
 """服务器侧：把 runner 抓好的 parquet 加载进 DuckDB（不触网关）。
 
-读取 raw_recent / adj_recent / meta / company / ths_hot，
-upsert raw_kline/adj_factor → 对「有新交易日」的 code 重算前复权写 kline →
-upsert stock_meta / stock_info，全量替换 ths_hot；最后原子替换 + 清 Redis 缓存。
+读取 raw_recent / adj_recent / valuation_recent / meta / company / ths_hot，
+upsert raw_kline/adj_factor/stock_valuation_daily → 对「有新交易日」的 code
+重算前复权写 kline → upsert stock_meta / stock_info，全量替换 ths_hot；
+最后原子替换 + 清 Redis 缓存。
 
 qfq 重算分两档（qfq = raw * factor / 最新factor）：
 - 复权基准（最新复权因子）不变 → 历史 qfq 不变，只为新交易日追加（秒级）；
@@ -48,24 +49,6 @@ _PROGRESS_EVERY = 500
 def _read(d: str, name: str) -> pd.DataFrame:
     p = os.path.join(d, name)
     return pd.read_parquet(p) if os.path.exists(p) else pd.DataFrame()
-
-
-def _acquire_lock(path: str):
-    """入库互斥锁：防止两个 load_all 并发互踩 .new 临时库。进程退出自动释放。
-
-    Linux（服务器）用 flock；Windows（本地开发）无 fcntl，跳过。
-    """
-    try:
-        import fcntl
-    except ImportError:
-        return None
-    fh = open(path, "w")
-    try:
-        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
-        fh.close()
-        raise SystemExit(f"[load_all] 已有入库进程在运行（{path} 被锁），本次退出")
-    return fh
 
 
 def _recompute_qfq(conn, kmax) -> tuple[int, int]:
@@ -115,15 +98,16 @@ def main(d: str | None = None) -> None:
         d = sys.argv[1] if len(sys.argv) > 1 else "/tmp/ingest"
     raw = _read(d, "raw_recent.parquet")
     adj = _read(d, "adj_recent.parquet")
+    val = _read(d, "valuation_recent.parquet")
     meta = _read(d, "meta.parquet")
     comp = _read(d, "company.parquet")
     hot = _read(d, "ths_hot.parquet")
     delisted = _read(d, "delisted.parquet")
     delisted_codes = delisted["code"].tolist() if not delisted.empty and "code" in delisted.columns else []
-    print(f"[load_all] 输入：raw={len(raw)} adj={len(adj)} meta={len(meta)} company={len(comp)} hot={len(hot)} delisted={len(delisted_codes)}")
+    print(f"[load_all] 输入：raw={len(raw)} adj={len(adj)} valuation={len(val)} meta={len(meta)} company={len(comp)} hot={len(hot)} delisted={len(delisted_codes)}")
 
     dest = db.DUCKDB_PATH
-    _lock = _acquire_lock(dest + ".ingest.lock")  # noqa: F841 持有到进程退出
+    _lock = db.acquire_ingest_lock()  # noqa: F841 持有到进程退出
     tmp = dest + ".new"
     # 连 .wal/.tmp 一起清：上次 abort 残留的 WAL 若不删，会被重放到本次新副本上
     for leftover in (tmp, tmp + ".wal", tmp + ".tmp"):
@@ -145,6 +129,8 @@ def main(d: str | None = None) -> None:
             db.upsert_raw(raw, conn)
         if not adj.empty:
             db.upsert_adj(adj, conn)
+        if not val.empty:
+            db.upsert_valuation_daily(val, conn)
 
         n_full, n_incr = _recompute_qfq(conn, kmax)
 

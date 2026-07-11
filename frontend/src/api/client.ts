@@ -4,10 +4,13 @@ import type {
   BreadthPoint,
   CompanyInfo,
   DayMovers,
+  DividendRow,
+  EarningsNews,
   HotStock,
   IndexPoint,
   LimitPoint,
   MaDuration,
+  QuarterlyFundamental,
   RankMetric,
   RankingRow,
   ScreeningChart,
@@ -15,6 +18,7 @@ import type {
   SearchRow,
   Status,
   StockKline,
+  Valuation,
   VolatilityPoint,
 } from "./types";
 
@@ -96,6 +100,43 @@ export const useVolatility = (code: string | null, window = 20) =>
     queryKey: ["vol", code, window],
     queryFn: () => get<VolatilityPoint[]>(`/stocks/${code}/volatility?window=${window}`),
     enabled: !!code,
+  });
+
+// 财务扩展接口：数据随财报季/每日入库更新，客户端缓存 24h 足够（同 useCompanyInfo）
+export const useQuarterlyFundamental = (code: string | null) =>
+  useQuery({
+    queryKey: ["quarterlyFundamental", code],
+    queryFn: () => get<QuarterlyFundamental>(`/stocks/${code}/fundamental/quarterly`),
+    enabled: !!code,
+    retry: false,
+    staleTime: 24 * 3600_000,
+  });
+
+export const useValuation = (code: string | null) =>
+  useQuery({
+    queryKey: ["valuation", code],
+    queryFn: () => get<Valuation>(`/stocks/${code}/valuation`),
+    enabled: !!code,
+    retry: false,
+    staleTime: 24 * 3600_000,
+  });
+
+export const useDividend = (code: string | null) =>
+  useQuery({
+    queryKey: ["dividend", code],
+    queryFn: () => get<DividendRow[]>(`/stocks/${code}/dividend`),
+    enabled: !!code,
+    retry: false,
+    staleTime: 24 * 3600_000,
+  });
+
+export const useEarnings = (code: string | null) =>
+  useQuery({
+    queryKey: ["earnings", code],
+    queryFn: () => get<EarningsNews>(`/stocks/${code}/earnings`),
+    enabled: !!code,
+    retry: false,
+    staleTime: 24 * 3600_000,
   });
 
 export const useScreeningYears = () =>

@@ -1,0 +1,57 @@
+name: 估值日频历史回填（一次性）
+
+# 手动触发：上线估值功能时回填 stock_valuation_daily 历史（KLINE_START_DATE 起）。
+# 日常增量由 daily_ingest.yml 维护（与换手率同一 daily_basic 响应，零新增调用量），
+# 本 workflow 只在首次上线或需要重建时跑。
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: valuation-backfill
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    # 每股 2 次调用（8 年窗口分页），3200 只 @90次/分 ≈ 72 分钟
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+
+      - name: runner 抓估值历史 -> parquet
+        env:
+          TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
+          TUSHARE_API_URL: ${{ secrets.TUSHARE_API_URL }}
+        run: |
+          uv run --no-project --with tushare --with pandas --with pyarrow --with numpy \
+            python scripts/backfill_valuation_parquet.py --outdir artifacts_val
+
+      - name: 传 parquet 到服务器
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          source: "artifacts_val/valuation.parquet"
+          target: "/tmp/ingest_val/"
+          strip_components: 1
+
+      - name: 服务器入库 + 清/预热 Redis
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          command_timeout: 60m
+          script: |
+            set -e
+            cd /root/Quantitative_A-shares/WechatNum
+            export PATH="/root/.local/bin:$PATH"
+            export DUCKDB_PATH=/root/Quantitative_A-shares/WechatNum/market.duckdb
+            bash deploy/update.sh
+            uv run python scripts/load_valuation.py /tmp/ingest_val
+            uv run python deploy/warmup_redis.py || true
+            rm -rf /tmp/ingest_val
