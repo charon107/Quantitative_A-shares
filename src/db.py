@@ -66,7 +66,7 @@ QUARTERLY_FUNDAMENTAL_COLUMNS = [
     "roe", "roe_dt", "roa", "netprofit_margin", "grossprofit_margin",
     "net_profit", "profit_dedt", "revenue", "eps", "bps", "debt_to_assets",
     "or_yoy", "netprofit_yoy", "dt_netprofit_yoy", "cfo",
-    "total_assets", "total_liab",
+    "total_assets", "total_liab", "total_debt",
     "q_roe", "q_dt_roe", "q_netprofit_margin", "q_gsprofit_margin",
     "q_net_profit", "q_revenue", "q_cfo",
     "q_sales_yoy", "q_sales_qoq", "q_netprofit_yoy", "q_netprofit_qoq",
@@ -231,6 +231,7 @@ CREATE TABLE IF NOT EXISTS stock_fundamental_quarterly (
     cfo                DOUBLE,
     total_assets       DOUBLE,
     total_liab         DOUBLE,
+    total_debt         DOUBLE,  -- 有息总债务=短借+长借+应付债券（选股 debt_ratio 分子口径）
     q_roe              FLOAT,
     q_dt_roe           FLOAT,
     q_netprofit_margin FLOAT,
@@ -522,6 +523,20 @@ def ensure_fundamental_schema(conn: duckdb.DuckDBPyConnection) -> bool:
     if "debt_ratio" in cols:
         return False
     conn.execute("DROP TABLE stock_fundamental")
+    init_schema(conn)
+    return True
+
+
+def ensure_quarterly_schema(conn: duckdb.DuckDBPyConnection) -> bool:
+    """stock_fundamental_quarterly 若还是旧结构（缺 total_debt 列）则整表重建。
+
+    该表每次基本面刷新都由全量 parquet 重写，DROP+重建比 ALTER 干净（同
+    ensure_fundamental_schema 的先例）。返回是否发生了重建。调用前需先 init_schema。
+    """
+    cols = {r[1] for r in conn.execute("PRAGMA table_info('stock_fundamental_quarterly')").fetchall()}
+    if "total_debt" in cols:
+        return False
+    conn.execute("DROP TABLE stock_fundamental_quarterly")
     init_schema(conn)
     return True
 

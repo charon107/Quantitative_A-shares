@@ -797,8 +797,8 @@ QUARTERLY_METRIC_COLUMNS = (
     "roe", "roe_dt", "roa", "netprofit_margin", "grossprofit_margin",
     "net_profit", "profit_dedt", "revenue", "eps", "bps", "debt_to_assets",
     "or_yoy", "netprofit_yoy", "dt_netprofit_yoy", "cfo",
-    # 期末时点值
-    "total_assets", "total_liab",
+    # 期末时点值（total_debt=短借+长借+应付债券，与年度选股 debt_ratio 分子同口径）
+    "total_assets", "total_liab", "total_debt",
     # 单季口径
     "q_roe", "q_dt_roe", "q_netprofit_margin", "q_gsprofit_margin",
     "q_net_profit", "q_revenue", "q_cfo",
@@ -845,7 +845,7 @@ def assemble_quarterly_fundamental(
     fina_cols = [*_FINA_PCT_COLS, *_FINA_ABS_COLS]
     inc_cols = ["net_profit", "revenue", "oper_cost"]
     cf_cols = ["cfo"]
-    bal_cols = ["total_assets", "total_liab", "equity"]
+    bal_cols = ["st_borr", "lt_borr", "bond_payable", "total_assets", "total_liab", "equity"]
 
     def _prep(df: pd.DataFrame, cols: list[str], ann_name: str) -> pd.DataFrame:
         """提取 year/quarter，同报告期多行（更正公告）按公告日保留最新。"""
@@ -911,6 +911,13 @@ def assemble_quarterly_fundamental(
     def _avg_positive(a: pd.Series, b: pd.Series) -> pd.Series:
         avg = (a + b) / 2
         return avg.where(avg > 0)
+
+    # 总债务（有息口径：短借+长借+应付债券，缺项视 0，与年度 debt_ratio 分子一致；
+    # 该报告期无资产负债表行则 NULL，不把"没数据"画成 0）
+    has_bal = df[bal_cols].notna().any(axis=1)
+    df["total_debt"] = (
+        df["st_borr"].fillna(0.0) + df["lt_borr"].fillna(0.0) + df["bond_payable"].fillna(0.0)
+    ).where(has_bal)
 
     # 期初值：YTD 比率的期初 = 上年末（上年Q4）时点值；单季比率的期初 = 上一报告期末
     q4_rows = df[df["quarter"].eq(4)]

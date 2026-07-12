@@ -32,7 +32,8 @@ const fmtYi = (v: unknown) => (typeof v === "number" ? `${v.toFixed(2)} 亿` : "
  * 季度基本面三联图（共享 X 轴 + 联动 axisPointer + dataZoom）：
  * ① 比率折线：ROE / 净利率 / 毛利率（%，缺口断线不插值）
  * ② 利润柱状：营收 / 净利润 / 经营现金流（亿元）
- * ③ 资产负债折线：总资产 / 总负债（亿元，期末时点值，不随口径切换）
+ * ③ 资产负债折线：总资产 / 总负债 / 总债务（亿元，期末时点值，不随口径切换；
+ *    总债务=短借+长借+应付债券，与年度选股 debt_ratio 分子同口径）
  * mode="single" 时 ①② 切换为单季口径（q_ 字段）。
  */
 function QuarterlyFundamentalChartImpl({ points, mode, height = 560 }: QuarterlyFundamentalChartProps) {
@@ -50,6 +51,7 @@ function QuarterlyFundamentalChartImpl({ points, mode, height = 560 }: Quarterly
   const cfo = points.map((p) => yi(single ? p.q_cfo : p.cfo));
   const totalAssets = points.map((p) => yi(p.total_assets));
   const totalLiab = points.map((p) => yi(p.total_liab));
+  const totalDebt = points.map((p) => yi(p.total_debt));
 
   const zoomStart = Math.max(0, ((labels.length - DEFAULT_QUARTERS) / Math.max(labels.length, 1)) * 100);
 
@@ -92,7 +94,7 @@ function QuarterlyFundamentalChartImpl({ points, mode, height = 560 }: Quarterly
 
   const option: EChartsOption = baseOption({
     legend: {
-      data: ["ROE", "净利率", "毛利率", "营收", "净利润", "经营现金流", "总资产", "总负债"],
+      data: ["ROE", "净利率", "毛利率", "营收", "净利润", "经营现金流", "总资产", "总负债", "总债务"],
       top: 4,
       textStyle: { color: C.muted, fontSize: 11, fontFamily: "'IBM Plex Mono', monospace" },
       itemWidth: 16,
@@ -149,6 +151,7 @@ function QuarterlyFundamentalChartImpl({ points, mode, height = 560 }: Quarterly
       bar("经营现金流", cfo, C.amber, 1),
       line("总资产", totalAssets, C.amber, 2),
       line("总负债", totalLiab, C.muted, 2),
+      line("总债务", totalDebt, C.clayDark, 2),
     ],
   });
 

@@ -181,6 +181,7 @@ export interface QuarterlyFundamentalPoint {
   cfo: number | null;
   total_assets: number | null;
   total_liab: number | null;
+  total_debt: number | null;
   q_roe: number | null;
   q_dt_roe: number | null;
   q_netprofit_margin: number | null;

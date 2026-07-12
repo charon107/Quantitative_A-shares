@@ -59,6 +59,8 @@ def main() -> None:
         db.init_schema(conn)
         if db.ensure_fundamental_schema(conn):
             print("[load_fund] stock_fundamental 旧结构（debt_to_assets），已重建为 debt_ratio 口径")
+        if db.ensure_quarterly_schema(conn):
+            print("[load_fund] stock_fundamental_quarterly 旧结构（缺 total_debt），已重建")
         if not fund.empty:
             n_fund = db.upsert_fundamental(fund, conn)
         if not idx.empty:

@@ -30,8 +30,8 @@ export function FundamentalPanel({ code }: { code: string }) {
         title="季度基本面"
         subtitle={
           mode === "cum"
-            ? "累计口径（年初至报告期末）· ROE/净利率/毛利率 · 营收/净利润/现金流 · 资产负债"
-            : "单季口径（相邻累计差分，Q1=累计）· 缺口断线不插值"
+            ? "累计口径（年初至报告期末）· 总债务=短借+长借+应付债券（有息）"
+            : "单季口径（相邻累计差分，Q1=累计）· 缺口断线不插值 · 总债务=短借+长借+应付债券"
         }
         right={
           <div className="inline-flex rounded-lg border border-line bg-panel2 p-0.5">

@@ -86,6 +86,17 @@ def test_ratio_derivation_when_fina_missing():
     assert q1["total_liab"] == pytest.approx(700.0)
 
 
+def test_total_debt_from_borrowings():
+    """总债务=短借+长借+应付债券（缺项视 0，与年度 debt_ratio 分子同口径）；
+    该报告期无资产负债表行 -> NULL（不把"没数据"画成 0）。"""
+    inc = _frame(["20230331", "20230630"], net_profit=[100.0, 250.0], revenue=[1000.0, 2200.0])
+    bal = _frame(["20230331"], st_borr=[76.10], lt_borr=[36.69], total_assets=[700.62])  # bond 缺项
+    out = _by_period(assemble_quarterly_fundamental(CODE, EMPTY, inc, EMPTY, bal))
+    assert out.loc[(2023, 1), "total_debt"] == pytest.approx(112.79)
+    assert out.loc[(2023, 1), "total_assets"] == pytest.approx(700.62)
+    assert pd.isna(out.loc[(2023, 2), "total_debt"])  # Q2 无 bal 行
+
+
 def test_q_roe_derivation_uses_adjacent_prev_period_equity():
     """单季 ROE 兜底：期初=上一报告期末净资产（上年Q4 → 本年Q1 跨年相邻也可用）。"""
     inc = _frame(["20221231", "20230331"], net_profit=[400.0, 100.0], revenue=[4000.0, 1000.0])

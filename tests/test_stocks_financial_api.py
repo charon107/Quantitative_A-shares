@@ -29,6 +29,8 @@ def duck_financial(duck):
         "net_profit": [1e8 * q for _, q in periods],
         "q_net_profit": [1e8] * 8,
         "cfo": [8e7 * q for _, q in periods],
+        "total_liab": [3e10] * 8,
+        "total_debt": [1.1e10] * 8,
         # q_roe 留空：验证 NULL 透传为 None
     })
     valuation = pd.DataFrame({
@@ -75,6 +77,8 @@ def test_quarterly_fundamental(duck_financial):
     assert pts[-1]["end_date"] == "2024-12-31"
     assert pts[0]["year"] == 2023 and pts[0]["quarter"] == 1
     assert pts[3]["roe"] == pytest.approx(0.20)
+    assert pts[0]["total_liab"] == pytest.approx(3e10)
+    assert pts[0]["total_debt"] == pytest.approx(1.1e10)  # 有息口径（短借+长借+应付债券）
     # NULL 透传为 None（缺失指标不造数）
     assert pts[0]["q_roe"] is None
     assert pts[0]["eps"] is None

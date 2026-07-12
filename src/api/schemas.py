@@ -192,6 +192,7 @@ class QuarterlyFundamentalPoint(BaseModel):
     cfo: float | None = None
     total_assets: float | None = None
     total_liab: float | None = None
+    total_debt: float | None = None
     q_roe: float | None = None
     q_dt_roe: float | None = None
     q_netprofit_margin: float | None = None
