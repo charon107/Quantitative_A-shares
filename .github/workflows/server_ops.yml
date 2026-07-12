@@ -1,9 +1,12 @@
 name: 服务器诊断与重预热
 
-# 一次性运维（2026-07-12）：补救 fundamentals_refresh run 29161530201——
-# runner 抓数与 scp 均成功（parquet 仍在 /tmp/ingest_fund），但服务器 git pull
-# 超时导致入库步骤未执行。本任务：拉代码（带重试）→ 重启 API（新财务接口生效）
-# → 入库五产物 + 跑选股 → 验证新表行数 → 预热。
+# 一次性运维（2026-07-12）：补救 fundamentals_refresh run 29161530201 +
+# 引导 bundle 推送部署。该 run 的 runner 抓数与 scp 均成功（parquet 仍在
+# /tmp/ingest_fund），但服务器 git pull 超时导致入库未执行。
+# 本任务：scp 代码 bundle → 内联 fetch+merge（引导：服务器旧版 update.sh
+# 不认 bundle 参数，第一次必须由内联脚本完成升级）→ 新版 update.sh 重启 API
+# → 入库五产物 + 跑选股 → 验证新表行数 → 预热。此后所有部署 workflow
+# 均走 bundle 推送，服务器不再连 GitHub。
 on:
   workflow_dispatch: {}
 
@@ -16,7 +19,27 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - name: 更新代码 + 入库财务扩展 + 验证
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # 打 git bundle 需要完整历史
+
+      - name: 打代码 bundle
+        run: |
+          mkdir -p deploy_pkg
+          git bundle create deploy_pkg/repo.bundle main
+
+      - name: 传 bundle 到服务器
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          source: "deploy_pkg/repo.bundle"
+          target: "/tmp/deploy/"
+          strip_components: 1
+
+      - name: 更新代码(bundle) + 入库财务扩展 + 验证
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.SERVER_HOST }}
@@ -29,13 +52,13 @@ jobs:
             cd /root/Quantitative_A-shares/WechatNum
             export PATH="/root/.local/bin:$PATH"
             export DUCKDB_PATH=/root/Quantitative_A-shares/WechatNum/market.duckdb
-            echo "=== git pull(重试 5 次) ==="
-            ok=""
-            for i in 1 2 3 4 5; do git pull --ff-only origin main && ok=1 && break; echo "pull 失败,重试 $i"; sleep 8; done
-            [ -n "$ok" ]
+            echo "=== 引导：内联 fetch+merge（服务器旧版 update.sh 不认 bundle 参数） ==="
+            git bundle verify /tmp/deploy/repo.bundle
+            git fetch /tmp/deploy/repo.bundle main
+            git merge --ff-only FETCH_HEAD
             git log -1 --oneline
-            echo "=== 重启 API(新财务接口生效) ==="
-            systemctl restart api
+            echo "=== 新版 update.sh（已是最新 -> 仅重启 API，新财务接口生效） ==="
+            bash deploy/update.sh /tmp/deploy/repo.bundle
             echo "=== 入库 /tmp/ingest_fund 五产物 + 跑选股 ==="
             ls -lh /tmp/ingest_fund
             uv run python scripts/load_fundamentals.py /tmp/ingest_fund
@@ -60,5 +83,5 @@ jobs:
             echo "=== 后台预热 + 清理 ==="
             nohup uv run python deploy/warmup_redis.py > /root/warmup.log 2>&1 &
             echo "warmup pid=$!"
-            rm -rf /tmp/ingest_fund
+            rm -rf /tmp/ingest_fund /tmp/deploy
             free -m | head -2

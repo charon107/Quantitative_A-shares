@@ -28,6 +28,8 @@ jobs:
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # 打 git bundle 需要完整历史
       - uses: astral-sh/setup-uv@v5
 
       - name: runner 抓财务/指数 -> parquet
@@ -39,6 +41,9 @@ jobs:
           if [ "${{ github.event.inputs.full }}" = "true" ]; then FLAG="--full"; fi
           uv run --no-project --with tushare --with pandas --with pyarrow --with numpy \
             python scripts/fetch_fundamentals_parquet.py --outdir artifacts_fund $FLAG
+
+      - name: 打代码 bundle（服务器免连 GitHub，随 parquet 一起 scp）
+        run: git bundle create artifacts_fund/repo.bundle main
 
       - name: 传 parquet 到服务器
         uses: appleboy/scp-action@v0.1.7
@@ -64,8 +69,9 @@ jobs:
             cd /root/Quantitative_A-shares/WechatNum
             export PATH="/root/.local/bin:$PATH"
             export DUCKDB_PATH=/root/Quantitative_A-shares/WechatNum/market.duckdb
-            # 先把服务器代码更新到与 runner 一致（load/选股逻辑随代码演进，旧代码跑新 parquet 会错位）
-            bash deploy/update.sh
+            # 先把服务器代码更新到与 runner 一致（load/选股逻辑随代码演进，旧代码跑新 parquet 会错位）；
+            # bundle 模式：代码来自 scp 来的单文件，服务器不连 GitHub
+            bash deploy/update.sh /tmp/ingest_fund/repo.bundle
             uv run python scripts/load_fundamentals.py /tmp/ingest_fund
             uv run python deploy/warmup_redis.py || true
             rm -rf /tmp/ingest_fund

@@ -10,7 +10,7 @@ name: 部署全量日线快照 DB
 #   2) 触发：gh workflow run deploy_db.yml -f release_tag=db-snapshot-YYYYMMDD
 #
 # 注意：目标目录用项目下 incoming/（/tmp 是 tmpfs，放不下 1.1GB）。
-# 服务器 git pull 偶发 TLS 失败（set -e 中止、无脏数据），重跑即可。
+# 代码走 git bundle 推送（随快照一起 scp），服务器不连 GitHub。
 on:
   workflow_dispatch:
     inputs:
@@ -27,7 +27,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
-      - name: 下载快照 release asset
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # 打 git bundle 需要完整历史
+
+      - name: 下载快照 release asset + 打代码 bundle
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -35,6 +39,7 @@ jobs:
           gh release download "${{ inputs.release_tag }}" \
             --repo "${{ github.repository }}" --pattern market.duckdb --dir snapshot
           mv snapshot/market.duckdb snapshot/market_new.duckdb
+          git bundle create snapshot/repo.bundle main
           ls -lh snapshot
 
       - name: 传快照到服务器 incoming/
@@ -63,8 +68,8 @@ jobs:
             export PATH="/root/.local/bin:$PATH"
             export DUCKDB_PATH=/root/Quantitative_A-shares/WechatNum/market.duckdb
             df -h / | tail -1
-            # 1) 代码更新到 main 最新（含 START_DATE=2013 与本 workflow 依赖的脚本）
-            bash deploy/update.sh
+            # 1) 代码更新到 main 最新（bundle 随快照 scp 到 incoming/，不连 GitHub）
+            bash deploy/update.sh incoming/repo.bundle
             # 2) 生产库非日线表合并进新库（READ_ONLY ATTACH，不影响在线服务）
             uv run python scripts/merge_keep_tables.py incoming/market_new.duckdb
             # 3) 原子替换（旧库 rename 进 backups/ 留恢复点）
