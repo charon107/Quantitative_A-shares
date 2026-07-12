@@ -22,10 +22,16 @@ fi
 
 echo "[$(ts)] 项目目录：$PROJECT_DIR"
 
-# 1) 拉取最新代码（仅快进，避免脏合并）
+# 1) 拉取最新代码（仅快进，避免脏合并；服务器连 GitHub 偶发超时，重试 5 次）
 BEFORE="$(git rev-parse HEAD)"
 echo "[$(ts)] 拉取 origin/main ..."
-git pull --ff-only origin main
+ok=""
+for i in 1 2 3 4 5; do
+    git pull --ff-only origin main && ok=1 && break
+    echo "[$(ts)] pull 失败，重试 $i/5 ..."
+    sleep 8
+done
+[ -n "$ok" ]
 AFTER="$(git rev-parse HEAD)"
 
 if [ "$BEFORE" = "$AFTER" ]; then

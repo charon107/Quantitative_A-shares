@@ -1,7 +1,9 @@
 name: 服务器诊断与重预热
 
-# 一次性运维（2026-07-09）：重算逐年选股（DEFAULT_END_YEAR 动态化后补出 2026 年）。
-# load_fundamentals.py 传空目录 = 不 upsert 新数据、只用库里现有年报面板重跑选股。
+# 一次性运维（2026-07-12）：补救 fundamentals_refresh run 29161530201——
+# runner 抓数与 scp 均成功（parquet 仍在 /tmp/ingest_fund），但服务器 git pull
+# 超时导致入库步骤未执行。本任务：拉代码（带重试）→ 重启 API（新财务接口生效）
+# → 入库五产物 + 跑选股 → 验证新表行数 → 预热。
 on:
   workflow_dispatch: {}
 
@@ -12,16 +14,16 @@ concurrency:
 jobs:
   ops:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
-      - name: 更新代码 + 重算选股 + 验证
+      - name: 更新代码 + 入库财务扩展 + 验证
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           password: ${{ secrets.SERVER_PASSWORD }}
           port: ${{ secrets.SERVER_PORT || 22 }}
-          command_timeout: 15m
+          command_timeout: 40m
           script: |
             set -e
             cd /root/Quantitative_A-shares/WechatNum
@@ -32,25 +34,31 @@ jobs:
             for i in 1 2 3 4 5; do git pull --ff-only origin main && ok=1 && break; echo "pull 失败,重试 $i"; sleep 8; done
             [ -n "$ok" ]
             git log -1 --oneline
-            echo "=== 重算逐年选股(空目录=只重算,不 upsert) ==="
-            mkdir -p /tmp/empty_fund
-            uv run python scripts/load_fundamentals.py /tmp/empty_fund
-            echo "=== 验证:年报与选股年份分布 ==="
+            echo "=== 重启 API(新财务接口生效) ==="
+            systemctl restart api
+            echo "=== 入库 /tmp/ingest_fund 五产物 + 跑选股 ==="
+            ls -lh /tmp/ingest_fund
+            uv run python scripts/load_fundamentals.py /tmp/ingest_fund
+            echo "=== 验证:新表行数与季度年份分布 ==="
             uv run python - <<'PYEOF'
             from src import db
             with db.connect(read_only=True) as conn:
-                print("stock_fundamental 最近年份:")
-                for y, n in conn.execute(
-                    "SELECT year, COUNT(*) FROM stock_fundamental GROUP BY year ORDER BY year DESC LIMIT 4"
+                for tbl in ("stock_fundamental_quarterly", "stock_dividend",
+                            "stock_forecast", "stock_express", "selected_stocks"):
+                    n = conn.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0]
+                    print(f"{tbl}: {n} 行")
+                print("stock_fundamental_quarterly 最近报告期:")
+                for ed, n in conn.execute(
+                    "SELECT end_date, COUNT(*) FROM stock_fundamental_quarterly "
+                    "GROUP BY end_date ORDER BY end_date DESC LIMIT 4"
                 ).fetchall():
-                    print(f"  {y}: {n} 只")
-                print("selected_stocks 逐年家数:")
-                for y, n in conn.execute(
-                    "SELECT year, COUNT(*) FROM selected_stocks GROUP BY year ORDER BY year"
-                ).fetchall():
-                    print(f"  {y}: {n} 只")
+                    print(f"  {ed}: {n} 只")
             PYEOF
-            echo "=== 后台预热 ==="
+            echo "=== 抽查 API ==="
+            sleep 2
+            curl -sf "http://127.0.0.1:8501/api/stocks/sh.600519/fundamental/quarterly" | head -c 400; echo
+            echo "=== 后台预热 + 清理 ==="
             nohup uv run python deploy/warmup_redis.py > /root/warmup.log 2>&1 &
             echo "warmup pid=$!"
+            rm -rf /tmp/ingest_fund
             free -m | head -2
