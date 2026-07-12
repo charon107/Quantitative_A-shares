@@ -113,10 +113,11 @@ function QuarterlyFundamentalChartImpl({ points, mode, height = 560 }: Quarterly
       },
     },
     axisPointer: { link: [{ xAxisIndex: "all" }] },
+    // y 轴在右侧：右边距要装下刻度数字 + 轴名（左侧无轴，留小边即可）
     grid: [
-      { left: 64, right: 18, top: 34, height: "22%" },
-      { left: 64, right: 18, top: "38%", height: "22%" },
-      { left: 64, right: 18, top: "68%", height: "20%" },
+      { left: 18, right: 64, top: 34, height: "22%" },
+      { left: 18, right: 64, top: "38%", height: "22%" },
+      { left: 18, right: 64, top: "68%", height: "20%" },
     ],
     xAxis: [xAxis(0, false), xAxis(1, false), xAxis(2, true)],
     yAxis: [
