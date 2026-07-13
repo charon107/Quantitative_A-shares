@@ -1,18 +1,22 @@
 name: 服务器应急诊断（只读）
 
-# 一次性应急（2026-07-12）：total_debt 回灌 workflow 成功结束后服务器失联
-# （ping 通、SSH "Connection closed"、8501 无响应）。疑似磁盘被 backups/
-# 轮转写满（当日三次大入库 swap）。本 workflow 只做只读诊断，不清理不重启，
-# 拿到事实后再决定处置。
+# 一次性应急（2026-07-12/13）：服务器本身健康（磁盘 43%、内存充足、api active），
+# 是开发机到服务器的链路被拦（疑似出口 IP 变更后被 fail2ban/安全组拒绝）。
+# 本 workflow：服务器本机 curl 验收 total_debt 数据 + 排查/解封 fail2ban。
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      unban_ip:
+        description: "需要从 fail2ban 解封的 IP（留空则只查看）"
+        required: false
+        default: ""
 
 jobs:
   diag:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: 只读诊断
+      - name: 验收 + fail2ban 排查
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.SERVER_HOST }}
@@ -21,19 +25,31 @@ jobs:
           port: ${{ secrets.SERVER_PORT || 22 }}
           command_timeout: 3m
           script: |
-            echo "=== 磁盘 ==="
-            df -h / || true
-            echo "=== 内存 ==="
-            free -m || true
-            echo "=== backups 占用 ==="
-            du -sh /root/Quantitative_A-shares/WechatNum/backups 2>/dev/null || true
-            ls -lht /root/Quantitative_A-shares/WechatNum/backups 2>/dev/null | head -12 || true
-            echo "=== 残留临时库 ==="
-            ls -lh /root/Quantitative_A-shares/WechatNum/market.duckdb* 2>/dev/null || true
-            echo "=== api 服务 ==="
-            systemctl is-active api || true
-            systemctl status api --no-pager 2>/dev/null | head -8 || true
-            echo "=== 内存大户 ==="
-            ps aux --sort=-%mem | head -8 || true
-            echo "=== dmesg OOM ==="
-            dmesg 2>/dev/null | grep -i -E "out of memory|oom" | tail -5 || true
+            echo "=== 福耀玻璃 2025Q4 total_debt 验收（本机 curl） ==="
+            curl -sf "http://127.0.0.1:8501/api/stocks/sh.600660/fundamental/quarterly" \
+              | python3 -c "
+            import json, sys
+            pts = {p['end_date']: p for p in json.load(sys.stdin)['points']}
+            p = pts.get('2025-12-31', {})
+            yi = lambda v: None if v is None else round(v / 1e8, 2)
+            print('total_debt:', yi(p.get('total_debt')), '亿 (期望 112.79)')
+            print('total_liab:', yi(p.get('total_liab')), '亿  total_assets:', yi(p.get('total_assets')), '亿')
+            "
+            echo "=== fail2ban 状态 ==="
+            if command -v fail2ban-client >/dev/null 2>&1; then
+              fail2ban-client status || true
+              for jail in $(fail2ban-client status 2>/dev/null | grep 'Jail list' | sed 's/.*://; s/,//g'); do
+                echo "--- jail: $jail"
+                fail2ban-client status "$jail" | grep -E "Banned IP|Currently banned" || true
+              done
+              UNBAN="${{ inputs.unban_ip }}"
+              if [ -n "$UNBAN" ]; then
+                echo "=== 解封 $UNBAN ==="
+                fail2ban-client unban "$UNBAN" || true
+              fi
+            else
+              echo "未安装 fail2ban"
+            fi
+            echo "=== 防火墙拒绝规则（含 36.230 段则说明被内核层拦截） ==="
+            iptables -L -n 2>/dev/null | grep -E "REJECT|DROP" | head -10 || true
+            nft list ruleset 2>/dev/null | grep -E "drop|reject" | head -10 || true
