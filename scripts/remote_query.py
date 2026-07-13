@@ -47,12 +47,20 @@ def query_df(sql: str, url: str | None = None, token: str | None = None) -> pd.D
     # 不走系统代理：服务器在国内（阿里云），Clash 类代理出口通常在海外，
     # 绕代理反而 502；requests 在 Windows 默认会读系统代理设置，显式关闭
     session.trust_env = False
-    resp = session.post(
-        f"{(url or DEFAULT_URL).rstrip('/')}/api/sql",
-        json={"sql": sql},
-        headers={"Authorization": f"Bearer {token}"},
-        timeout=_TIMEOUT_SECONDS,
-    )
+    base = (url or DEFAULT_URL).rstrip("/")
+    try:
+        resp = session.post(
+            f"{base}/api/sql",
+            json={"sql": sql},
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=_TIMEOUT_SECONDS,
+        )
+    except requests.exceptions.ConnectionError as e:
+        raise RuntimeError(
+            f"连不上 {base}——多为本机到服务器的链路被运营商掐断（本项目已知现象，"
+            "ping 通但 TCP 无响应），通常几小时内自行恢复；"
+            "可 gh workflow run rescue_diag.yml 从 runner 侧确认服务器本身健康"
+        ) from e
     if resp.status_code != 200:
         raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:500]}")
     if resp.headers.get("X-Truncated") == "true":
