@@ -1,0 +1,39 @@
+name: 服务器应急诊断（只读）
+
+# 一次性应急（2026-07-12）：total_debt 回灌 workflow 成功结束后服务器失联
+# （ping 通、SSH "Connection closed"、8501 无响应）。疑似磁盘被 backups/
+# 轮转写满（当日三次大入库 swap）。本 workflow 只做只读诊断，不清理不重启，
+# 拿到事实后再决定处置。
+on:
+  workflow_dispatch: {}
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 只读诊断
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          command_timeout: 3m
+          script: |
+            echo "=== 磁盘 ==="
+            df -h / || true
+            echo "=== 内存 ==="
+            free -m || true
+            echo "=== backups 占用 ==="
+            du -sh /root/Quantitative_A-shares/WechatNum/backups 2>/dev/null || true
+            ls -lht /root/Quantitative_A-shares/WechatNum/backups 2>/dev/null | head -12 || true
+            echo "=== 残留临时库 ==="
+            ls -lh /root/Quantitative_A-shares/WechatNum/market.duckdb* 2>/dev/null || true
+            echo "=== api 服务 ==="
+            systemctl is-active api || true
+            systemctl status api --no-pager 2>/dev/null | head -8 || true
+            echo "=== 内存大户 ==="
+            ps aux --sort=-%mem | head -8 || true
+            echo "=== dmesg OOM ==="
+            dmesg 2>/dev/null | grep -i -E "out of memory|oom" | tail -5 || true
