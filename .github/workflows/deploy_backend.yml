@@ -1,0 +1,59 @@
+name: 后端代码部署
+
+# 通用后端部署（与 deploy_frontend 对偶）：任何 src/scripts/deploy 改动后手动触发。
+# 遵循 bundle 推送模式——runner 打 git bundle 随 scp 推，服务器零 GitHub 出站依赖，
+# update.sh 本地 fetch+merge -> 按需 uv sync -> 重启 api。
+# 顺带幂等下发 SQL_API_TOKEN 到服务器 .env（只读 SQL 网关 /api/sql 的鉴权）。
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: daily-ingest   # 与每日入库/其它部署互斥
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # 打 git bundle 需要完整历史
+
+      - name: 打代码 bundle
+        run: |
+          mkdir -p deploy_pkg
+          git bundle create deploy_pkg/repo.bundle main
+
+      - name: 传 bundle 到服务器
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          source: "deploy_pkg/repo.bundle"
+          target: "/tmp/deploy/"
+          strip_components: 1
+
+      - name: 服务器更新代码 + 重启 API
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          command_timeout: 10m
+          script: |
+            set -e
+            cd /root/Quantitative_A-shares/WechatNum
+            export PATH="/root/.local/bin:$PATH"
+            # 幂等下发 SQL 网关 token（已存在则不动；secrets 未配置则跳过）
+            if [ -n "${{ secrets.SQL_API_TOKEN }}" ]; then
+              touch .env
+              grep -q '^SQL_API_TOKEN=' .env || echo "SQL_API_TOKEN=${{ secrets.SQL_API_TOKEN }}" >> .env
+            fi
+            bash deploy/update.sh /tmp/deploy/repo.bundle
+            rm -rf /tmp/deploy
+            sleep 2
+            curl -sf http://127.0.0.1:8501/api/health && echo " <- api 健康"

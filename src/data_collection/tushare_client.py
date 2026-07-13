@@ -14,23 +14,8 @@ import random
 import pandas as pd
 import tushare as ts
 
-
-def _load_dotenv() -> None:
-    """把仓库根目录 .env 里的键值补进环境变量（已设置的环境变量优先，不覆盖）。"""
-    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    path = os.path.join(root, ".env")
-    if not os.path.exists(path):
-        return
-    with open(path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            k, v = line.split("=", 1)
-            os.environ.setdefault(k.strip(), v.strip())
-
-
-_load_dotenv()
+# 导入即触发仓库根 .env 加载（TUSHARE_TOKEN/TUSHARE_API_URL 等补进环境变量）
+from src import config as _config  # noqa: F401
 
 # 个人 tushare token（去 tushare.pro 注册获取，或第三方代理分配的 token），
 # 由调用方自行配置环境变量（或放在仓库根目录 .env，已 gitignore）
