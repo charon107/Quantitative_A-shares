@@ -43,7 +43,11 @@ def query_df(sql: str, url: str | None = None, token: str | None = None) -> pd.D
     token = token or config.SQL_API_TOKEN
     if not token:
         raise RuntimeError("未配置 SQL_API_TOKEN（环境变量或仓库根 .env）")
-    resp = requests.post(
+    session = requests.Session()
+    # 不走系统代理：服务器在国内（阿里云），Clash 类代理出口通常在海外，
+    # 绕代理反而 502；requests 在 Windows 默认会读系统代理设置，显式关闭
+    session.trust_env = False
+    resp = session.post(
         f"{(url or DEFAULT_URL).rstrip('/')}/api/sql",
         json={"sql": sql},
         headers={"Authorization": f"Bearer {token}"},

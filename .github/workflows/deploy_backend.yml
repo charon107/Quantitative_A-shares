@@ -57,3 +57,20 @@ jobs:
             rm -rf /tmp/deploy
             sleep 2
             curl -sf http://127.0.0.1:8501/api/health && echo " <- api 健康"
+
+      - name: 公网验收 SQL 网关（runner 侧）
+        env:
+          SQL_API_TOKEN: ${{ secrets.SQL_API_TOKEN }}
+        run: |
+          if [ -z "$SQL_API_TOKEN" ]; then echo "未配置 SQL_API_TOKEN secret，跳过"; exit 0; fi
+          code=$(curl -s -o /tmp/out.arrow -D /tmp/headers.txt -w "%{http_code}" \
+            -X POST "http://${{ secrets.SERVER_HOST }}:8501/api/sql" \
+            -H "Authorization: Bearer $SQL_API_TOKEN" -H "Content-Type: application/json" \
+            -d '{"sql":"SELECT COUNT(*) AS n FROM stock_fundamental_quarterly"}')
+          echo "HTTP $code"; grep -iE "x-rows|x-truncated|content-type" /tmp/headers.txt
+          [ "$code" = "200" ]
+          # 无 token 必须被拒（403）
+          denied=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+            "http://${{ secrets.SERVER_HOST }}:8501/api/sql" \
+            -H "Content-Type: application/json" -d '{"sql":"SELECT 1"}')
+          echo "无 token: HTTP $denied"; [ "$denied" = "403" ]
