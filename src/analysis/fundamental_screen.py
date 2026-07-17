@@ -9,6 +9,8 @@
       且过去五年最低净利润增长率 >= 10%，且过去五年净利润均 > 0。
   条件3（负债）：总债务/总资产 < 0.5，
       总债务 = 长期借款 + 短期借款 + 应付债券（有息负债口径，非总负债）。
+  条件4（现金流质量）：过去五年平均经营活动现金流净额 / 过去五年平均净利润 >= 0.7。
+      等价于五年 CFO 合计 / 五年净利润合计 >= 0.7（分子分母同为 5 年均值，计数相同）。
 
 数据来自 DuckDB 的 `stock_fundamental` 表（tushare 采集，比率已 ÷100 归一为小数），
 code->name 从 `stock_meta` 取。
@@ -27,6 +29,7 @@ ROE_MIN_MIN = 0.10     # 条件1：近5年最小 ROE
 YOYNI_MIN = 0.10       # 条件2：近5年每年净利润增速
 NP_CAGR_MIN = 0.15     # 条件2：近5年净利润 CAGR
 DEBT_RATIO_MAX = 0.5   # 条件3：期末总债务/总资产（有息负债口径）
+CFO_TO_NP_MIN = 0.7    # 条件4：五年平均经营现金流净额 / 五年平均净利润
 
 WINDOW_YEARS = 5  # 最近 5 年
 
@@ -61,9 +64,9 @@ def compute_cagr(v_start: float, v_end: float, years: int) -> float:
 
 
 def load_fundamental_panel(path: str | None = None) -> pd.DataFrame:
-    """读取全市场年报财务面板。列：code/year/ann_date/roe/netprofit_yoy/debt_ratio/net_profit。"""
+    """读取全市场年报财务面板。列：code/year/ann_date/roe/netprofit_yoy/debt_ratio/net_profit/cfo。"""
     df = db.query_df(
-        "SELECT code, year, ann_date, roe, netprofit_yoy, debt_ratio, net_profit "
+        "SELECT code, year, ann_date, roe, netprofit_yoy, debt_ratio, net_profit, cfo "
         "FROM stock_fundamental",
         path=path,
     )
@@ -76,7 +79,7 @@ def _finalize_panel(df: pd.DataFrame) -> pd.DataFrame:
         return df
     df = df.copy()
     df["year"] = pd.to_numeric(df["year"], errors="coerce").astype("Int64")
-    for c in ("roe", "netprofit_yoy", "debt_ratio", "net_profit"):
+    for c in ("roe", "netprofit_yoy", "debt_ratio", "net_profit", "cfo"):
         df[c] = pd.to_numeric(df[c], errors="coerce")
     return df.sort_values(["code", "year"]).drop_duplicates(["code", "year"], keep="last")
 
@@ -84,7 +87,7 @@ def _finalize_panel(df: pd.DataFrame) -> pd.DataFrame:
 def panel_from_conn(conn) -> pd.DataFrame:
     """用已打开的 DuckDB 连接读取选股面板（入库脚本复用同一写连接，避免重复 open 文件）。"""
     df = conn.execute(
-        "SELECT code, year, ann_date, roe, netprofit_yoy, debt_ratio, net_profit "
+        "SELECT code, year, ann_date, roe, netprofit_yoy, debt_ratio, net_profit, cfo "
         "FROM stock_fundamental"
     ).df()
     return _finalize_panel(df)
@@ -93,11 +96,12 @@ def panel_from_conn(conn) -> pd.DataFrame:
 def pick_stocks_by_year(panel: pd.DataFrame, select_year: int) -> list[str]:
     """在年份 select_year 选股，返回 code 列表（sh.600000 风格，已排序）。
 
-    实现模块 docstring 的三条件：
+    实现模块 docstring 的四条件：
     - 条件1：roe 均值 >= 0.15 且每年 >= 0.10
     - 条件2：netprofit_yoy 每年 >= 0.10、净利润恒正、净利润 5 年 CAGR >= 0.15
     - 条件3：期末 debt_ratio（总债务/总资产）< 0.5
-    - roe/netprofit_yoy/net_profit 近 5 年齐全（>=5 条）
+    - 条件4：五年平均 cfo / 五年平均 net_profit >= 0.7
+    - roe/netprofit_yoy/net_profit/cfo 近 5 年齐全（>=5 条）
     """
     fy_end = select_year - 1
     years = list(range(fy_end - (WINDOW_YEARS - 1), fy_end + 1))  # 5 年窗口
@@ -109,13 +113,15 @@ def pick_stocks_by_year(panel: pd.DataFrame, select_year: int) -> list[str]:
     g = sub.groupby("code", as_index=False)
     roe_stats = g["roe"].agg(roe_mean="mean", roe_min="min", roe_cnt="count")
     yoy_stats = g["netprofit_yoy"].agg(yoy_min="min", yoy_cnt="count")
+    cfo_stats = g["cfo"].agg(cfo_mean="mean", cfo_cnt="count")
 
     sub_sorted = sub.sort_values(["code", "year"])
     first_np = sub_sorted.groupby("code")["net_profit"].first().rename("np_first")
     last_np = sub_sorted.groupby("code")["net_profit"].last().rename("np_last")
     np_min = sub_sorted.groupby("code")["net_profit"].min().rename("np_min")
+    np_mean = sub_sorted.groupby("code")["net_profit"].mean().rename("np_mean")
     np_cnt = sub_sorted.groupby("code")["net_profit"].count().rename("np_cnt")
-    np_stats = pd.concat([first_np, last_np, np_min, np_cnt], axis=1).reset_index()
+    np_stats = pd.concat([first_np, last_np, np_min, np_mean, np_cnt], axis=1).reset_index()
 
     debt_end = (
         sub_sorted[sub_sorted["year"] == fy_end][["code", "debt_ratio"]]
@@ -125,6 +131,7 @@ def pick_stocks_by_year(panel: pd.DataFrame, select_year: int) -> list[str]:
 
     stats = (
         roe_stats.merge(yoy_stats, on="code", how="inner")
+        .merge(cfo_stats, on="code", how="inner")
         .merge(np_stats, on="code", how="inner")
         .merge(debt_end, on="code", how="inner")
     )
@@ -133,12 +140,15 @@ def pick_stocks_by_year(panel: pd.DataFrame, select_year: int) -> list[str]:
         lambda r: compute_cagr(r["np_first"], r["np_last"], years=WINDOW_YEARS - 1),
         axis=1,
     )
+    # 条件4：五年平均 cfo / 五年平均净利润。条件2 已保证 np_min>0 → np_mean>0，分母恒正。
+    stats["cfo_np_ratio"] = stats["cfo_mean"] / stats["np_mean"]
 
     need_cnt = WINDOW_YEARS
     stats = stats[
         (stats["roe_cnt"] >= need_cnt)
         & (stats["yoy_cnt"] >= need_cnt)
         & (stats["np_cnt"] >= need_cnt)
+        & (stats["cfo_cnt"] >= need_cnt)
     ].copy()
 
     picked = stats[
@@ -148,6 +158,7 @@ def pick_stocks_by_year(panel: pd.DataFrame, select_year: int) -> list[str]:
         & (stats["np_min"] > 0)
         & (stats["np_cagr"] >= NP_CAGR_MIN)
         & (stats["debt_end"] < DEBT_RATIO_MAX)
+        & (stats["cfo_np_ratio"] >= CFO_TO_NP_MIN)
     ]["code"].sort_values().tolist()
 
     return picked

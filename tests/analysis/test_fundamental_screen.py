@@ -11,16 +11,21 @@ if PROJECT_ROOT not in sys.path:
 from src.analysis import fundamental_screen as fs  # noqa: E402
 
 
-def _rows(code, years, roe, yoy, debt, np_list):
-    """按年生成 stock_fundamental 原始行（单位为小数，与采集层归一后一致）。"""
+def _rows(code, years, roe, yoy, debt, np_list, cfo=None):
+    """按年生成 stock_fundamental 原始行（单位为小数，与采集层归一后一致）。
+
+    cfo 默认等于 net_profit（比值=1.0，条件4 达标），使不针对条件4 的用例保持通过。
+    """
+    years = list(years)
     return pd.DataFrame({
         "code": code,
-        "year": list(years),
+        "year": years,
         "ann_date": [f"{y + 1}-04-15" for y in years],
         "roe": roe,
         "netprofit_yoy": yoy,
         "debt_ratio": debt,
         "net_profit": np_list,
+        "cfo": list(np_list) if cfo is None else cfo,
     })
 
 
@@ -98,6 +103,43 @@ def test_low_yoy_rejected():
         yoy=[0.20, 0.20, 0.08, 0.20, 0.20],        # 2015 年 8% < 10%
         debt=[0.30] * 5,
         np_list=[100, 120, 150, 180, 210],
+    )
+    assert fs.pick_stocks_by_year(_panel(bad), 2018) == []
+
+
+def test_low_cfo_ratio_rejected():
+    """五年平均现金流/五年平均净利润 < 0.7 -> 剔除（条件4）。"""
+    years = range(2013, 2018)
+    bad = _rows(
+        "sz.000333", years,
+        roe=[0.30] * 5, yoy=[0.20] * 5, debt=[0.30] * 5,
+        np_list=[100, 120, 150, 180, 210],
+        cfo=[50, 60, 75, 90, 105],                 # 恒为净利润的 0.5 倍 < 0.7
+    )
+    assert fs.pick_stocks_by_year(_panel(bad), 2018) == []
+
+
+def test_cfo_ratio_uses_five_year_average_not_each_year():
+    """条件4 看五年均值之比：个别年份现金流为负，只要五年合计 >= 0.7 倍仍入选。"""
+    years = range(2013, 2018)
+    # 净利润合计 760，现金流合计 700（比值≈0.92）；其中 2015 年现金流为负
+    ok = _rows(
+        "sz.000651", years,
+        roe=[0.30] * 5, yoy=[0.20] * 5, debt=[0.30] * 5,
+        np_list=[100, 120, 150, 180, 210],
+        cfo=[150, 180, -30, 200, 200],
+    )
+    assert fs.pick_stocks_by_year(_panel(ok), 2018) == ["sz.000651"]
+
+
+def test_missing_cfo_year_rejected():
+    """cfo 近 5 年不齐（某年缺失）-> 剔除（齐全性要求）。"""
+    years = range(2013, 2018)
+    bad = _rows(
+        "sz.000858", years,
+        roe=[0.30] * 5, yoy=[0.20] * 5, debt=[0.30] * 5,
+        np_list=[100, 120, 150, 180, 210],
+        cfo=[100, 120, None, 180, 210],            # 2015 年 cfo 缺失
     )
     assert fs.pick_stocks_by_year(_panel(bad), 2018) == []
 
