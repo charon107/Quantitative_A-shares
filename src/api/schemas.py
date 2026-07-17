@@ -152,6 +152,7 @@ class ScreeningRow(BaseModel):
     netprofit_yoy: float | None = None
     debt_ratio: float | None = None
     net_profit: float | None = None
+    cfo_np_ratio: float | None = None
 
 
 class ChartLinePoint(BaseModel):

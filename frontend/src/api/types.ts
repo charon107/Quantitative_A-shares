@@ -156,6 +156,7 @@ export interface ScreeningRow {
   netprofit_yoy: number | null;
   debt_ratio: number | null;
   net_profit: number | null;
+  cfo_np_ratio: number | null;
 }
 
 // 季度基本面单期。比率为小数、金额为元；q_ 前缀为单季口径（差分预计算，Q1=累计）

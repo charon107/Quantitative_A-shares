@@ -363,20 +363,29 @@ def selection_years(path: str | None = None) -> list[int]:
 def selected_stocks_by_year(year: int, path: str | None = None) -> pd.DataFrame:
     """某年选出的股票池，带上该股选股窗口末年(year-1)的展示财务指标。
 
-    列：code / code_name / roe / netprofit_yoy / debt_ratio / net_profit。
+    列：code / code_name / roe / netprofit_yoy / debt_ratio / net_profit / cfo_np_ratio。
+    cfo_np_ratio 是选股五年窗口 [year-5, year-1] 的 SUM(cfo)/SUM(net_profit)
+    （等价条件4 的五年均值之比；入选股 cfo 五年齐全，与筛选口径一致）。
     """
     try:
         return db.query_df(
             """
             SELECT s.code, s.code_name,
-                   f.roe, f.netprofit_yoy, f.debt_ratio, f.net_profit
+                   f.roe, f.netprofit_yoy, f.debt_ratio, f.net_profit,
+                   cf.cfo_np_ratio
             FROM selected_stocks s
             LEFT JOIN stock_fundamental f
               ON s.code = f.code AND f.year = ? - 1
+            LEFT JOIN (
+                SELECT code, SUM(cfo) / NULLIF(SUM(net_profit), 0) AS cfo_np_ratio
+                FROM stock_fundamental
+                WHERE year BETWEEN ? - 5 AND ? - 1
+                GROUP BY code
+            ) cf ON s.code = cf.code
             WHERE s.year = ?
             ORDER BY s.code
             """,
-            [year, year],
+            [year, year, year, year],
             path=path,
         )
     except Exception:

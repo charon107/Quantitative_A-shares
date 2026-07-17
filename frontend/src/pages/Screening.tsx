@@ -8,6 +8,8 @@ import { ScreeningChart } from "../charts/ScreeningChart";
 const pct = (v: number | null) => (v == null ? "—" : `${(v * 100).toFixed(2)}%`);
 /** 净利润：元 -> 亿。 */
 const yi = (v: number | null) => (v == null ? "—" : `${(v / 1e8).toFixed(2)} 亿`);
+/** 现金流/净利：倍数（非百分比），保留两位小数。 */
+const ratio = (v: number | null) => (v == null ? "—" : v.toFixed(2));
 
 export function Screening({ onOpenStock }: { onOpenStock: (code: string) => void }) {
   const years = useScreeningYears();
@@ -74,6 +76,7 @@ export function Screening({ onOpenStock }: { onOpenStock: (code: string) => void
                     <th className="px-3 py-2 text-right font-medium">ROE</th>
                     <th className="px-3 py-2 text-right font-medium">净利增速</th>
                     <th className="px-3 py-2 text-right font-medium">总债务/总资产</th>
+                    <th className="px-3 py-2 text-right font-medium">现金流/净利</th>
                     <th className="px-3 py-2 text-right font-medium">净利润</th>
                   </tr>
                 </thead>
@@ -103,6 +106,7 @@ export function Screening({ onOpenStock }: { onOpenStock: (code: string) => void
                       <td className="px-3 py-2 text-right nums">{pct(row.roe)}</td>
                       <td className="px-3 py-2 text-right nums">{pct(row.netprofit_yoy)}</td>
                       <td className="px-3 py-2 text-right nums">{pct(row.debt_ratio)}</td>
+                      <td className="px-3 py-2 text-right nums">{ratio(row.cfo_np_ratio)}</td>
                       <td className="px-3 py-2 text-right nums">{yi(row.net_profit)}</td>
                     </tr>
                   ))}
