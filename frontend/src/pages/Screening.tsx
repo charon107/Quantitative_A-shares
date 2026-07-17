@@ -30,7 +30,7 @@ export function Screening({ onOpenStock }: { onOpenStock: (code: string) => void
       <Card>
         <CardHeader
           title="基本面选股"
-          subtitle="逐年回测池 · 近5年 ROE≥15%(最低≥10%) / 净利增速≥10% / 净利CAGR≥15% / 总债务/总资产<50% · 剔除银行股"
+          subtitle="逐年回测池 · 近5年 ROE≥15%(最低≥10%) / 净利增速≥10% / 净利CAGR≥15% / 总债务/总资产<50% / 现金流÷净利≥0.7 · 剔除银行股"
         />
         {years.data && years.data.length > 0 && (
           <div className="flex flex-wrap items-center gap-2 border-b border-line/60 px-5 pb-3">
