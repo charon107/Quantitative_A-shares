@@ -15,6 +15,7 @@ export function Screening({ onOpenStock }: { onOpenStock: (code: string) => void
   const years = useScreeningYears();
   const [year, setYear] = useState<number | null>(null);
   const [picked, setPicked] = useState<string | null>(null);
+  const [yearInput, setYearInput] = useState<string>("");
 
   // 默认选中最新一年
   useEffect(() => {
@@ -22,6 +23,24 @@ export function Screening({ onOpenStock }: { onOpenStock: (code: string) => void
       setYear(years.data[years.data.length - 1]);
     }
   }, [years.data, year]);
+
+  // year 变化（默认选中或用户提交）时同步输入框显示
+  useEffect(() => {
+    if (year != null) setYearInput(String(year));
+  }, [year]);
+
+  // 提交年份：有效（1990–2100）则切换，无效则恢复为当前年
+  const submitYear = (raw: string) => {
+    const y = parseInt(raw, 10);
+    if (!Number.isNaN(y) && y >= 1990 && y <= 2100) {
+      if (y !== year) {
+        setYear(y);
+        setPicked(null);
+      }
+    } else {
+      setYearInput(year != null ? String(year) : "");
+    }
+  };
 
   const list = useScreening(year);
   const chart = useScreeningChart(year, picked);
@@ -36,26 +55,30 @@ export function Screening({ onOpenStock }: { onOpenStock: (code: string) => void
         />
         {years.data && years.data.length > 0 && (
           <div className="flex flex-wrap items-center gap-2 border-b border-line/60 px-5 pb-3">
-            <span className="text-xs text-muted">选股年份</span>
-            <div className="flex flex-wrap gap-1 rounded-lg border border-line bg-panel2 p-1">
-              {years.data.map((y) => (
-                <button
-                  key={y}
-                  onClick={() => {
-                    setYear(y);
-                    setPicked(null);
-                  }}
-                  aria-pressed={year === y}
-                  className={`min-w-[3.25rem] rounded-md px-3 py-1.5 text-sm font-medium transition ${
-                    year === y
-                      ? "bg-panel text-clay shadow-soft ring-1 ring-line"
-                      : "text-muted hover:bg-panel/60 hover:text-ink"
-                  }`}
-                >
-                  {y}
-                </button>
+            <label htmlFor="year-select" className="text-xs text-muted">选股年份</label>
+            <input
+              id="year-select"
+              type="text"
+              inputMode="numeric"
+              list="screening-years"
+              value={yearInput}
+              onChange={(e) => {
+                const v = e.target.value.replace(/[^\d]/g, "").slice(0, 4);
+                setYearInput(v);
+                if (v.length === 4) submitYear(v); // 选中下拉项或输满 4 位即查询
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") submitYear(yearInput);
+              }}
+              onBlur={() => submitYear(yearInput)}
+              placeholder="选择或输入"
+              className="w-36 rounded-lg border border-line bg-panel2 px-3 py-1.5 text-sm text-ink outline-none transition focus:border-clay focus:ring-1 focus:ring-clay"
+            />
+            <datalist id="screening-years">
+              {[...years.data].reverse().map((y) => (
+                <option key={y} value={y} />
               ))}
-            </div>
+            </datalist>
           </div>
         )}
         <div className="px-2 pb-4">
