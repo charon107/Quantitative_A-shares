@@ -1,0 +1,60 @@
+name: 重算选股（条件4 上线）
+
+# 一次性运维（2026-07-17）：基本面选股新增条件4（五年平均现金流/净利润>=0.7）。
+# API 端 selected_stocks 是入库时预存表，仅部署代码不会刷新历史选股池。
+# cfo 已在库，无需重采集——空目录跑 load_fundamentals.py：跳过 upsert，用现有
+# stock_fundamental panel 重算 select_pool -> replace_selected_stocks -> 清 Redis。
+# 服务器代码在 deploy_backend（24b3260）已更新，此处不再推 bundle，纯 SSH 触发。
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: daily-ingest   # 与每日入库/部署互斥，避免并发 copy2+swap 丢数据
+  cancel-in-progress: false
+
+jobs:
+  reselect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: 服务器空目录重算选股 + 清/预热 Redis
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          command_timeout: 15m
+          script: |
+            set -e
+            cd /root/Quantitative_A-shares/WechatNum
+            export PATH="/root/.local/bin:$PATH"
+            export DUCKDB_PATH=/root/Quantitative_A-shares/WechatNum/market.duckdb
+            echo "=== 服务器代码 HEAD（须含条件4 commit 24b3260） ==="
+            git log -1 --oneline
+            echo "=== 重算前 selected_stocks 行数 ==="
+            uv run python - <<'PYEOF'
+            from src import db
+            with db.connect(read_only=True) as conn:
+                print("before:", conn.execute("SELECT COUNT(*) FROM selected_stocks").fetchone()[0])
+            PYEOF
+            echo "=== 空目录跑 load_fundamentals.py（只重算选股+清缓存，不采集） ==="
+            mkdir -p /tmp/reselect_empty && rm -f /tmp/reselect_empty/*.parquet
+            uv run python scripts/load_fundamentals.py /tmp/reselect_empty
+            echo "=== 重算后 selected_stocks 行数 + 近年分布 ==="
+            uv run python - <<'PYEOF'
+            from src import db
+            with db.connect(read_only=True) as conn:
+                n = conn.execute("SELECT COUNT(*) FROM selected_stocks").fetchone()[0]
+                print("after:", n)
+                for y, c in conn.execute(
+                    "SELECT year, COUNT(*) FROM selected_stocks "
+                    "GROUP BY year ORDER BY year DESC LIMIT 6"
+                ).fetchall():
+                    print(f"  {y}: {c} 只")
+            PYEOF
+            echo "=== 抽查选股 API（清缓存后首查即走新表） ==="
+            sleep 2
+            curl -sf "http://127.0.0.1:8501/api/screening/years" | head -c 200; echo
+            uv run python deploy/warmup_redis.py || true
+            rm -rf /tmp/reselect_empty
