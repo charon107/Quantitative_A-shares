@@ -111,7 +111,7 @@ export function Screening({ onOpenStock }: { onOpenStock: (code: string) => void
         <Card>
           <CardHeader
             title={`股价图 · ${chart.data?.code_name ?? picked}`}
-            subtitle={`${year} 年初起 · 截止 ${chart.data?.next_pub ?? "最新"} · 虚线为财报公布日 · 下方上证指数对照`}
+            subtitle={`${year} 年初起 · 截止 ${chart.data?.next_pub ?? "最新"} · 虚线为财报公布日 · 悬停看相对财报日的超额收益`}
             right={
               <div className="flex items-center gap-3">
                 <button onClick={() => onOpenStock(picked)} className="text-xs text-clay hover:underline">

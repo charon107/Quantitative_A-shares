@@ -48,6 +48,55 @@ function ScreeningChartImpl({
 
   const f2 = (v: number | null | undefined) => (v == null ? "—" : v.toFixed(2));
 
+  // —— 超额收益：以首个财报公布日（无则首个交易日）为基准，算个股/指数相对涨跌 ——
+  const stockCloseByDate = new Map(stock.map((p) => [p.date, p.close]));
+  const stockMaByDate = new Map(stock.map((p) => [p.date, p.ma]));
+  const indexCloseByDate = new Map(index.map((p) => [p.date, p.close]));
+
+  const baseDate = pubDates[0] ?? dates[0] ?? null;
+  // 基准日若停牌/缺值，则向后取第一个有效收盘价作为基准点
+  const firstValidFrom = (arr: ChartLinePoint[], from: string | null) => {
+    if (!from) return null;
+    for (const p of arr) {
+      if (p.date >= from && p.close != null) return { date: p.date, close: p.close };
+    }
+    return null;
+  };
+  const baseStock = firstValidFrom(stock, baseDate);
+  const baseIndex = firstValidFrom(index, baseDate);
+
+  const signPct = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
+  const retColor = (v: number) => (v >= 0 ? C.up : C.down);
+  const dot = (color: string) =>
+    `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};margin-right:6px;vertical-align:middle;"></span>`;
+  const row = (label: string, value: string, bold = false) =>
+    `<div style="display:flex;justify-content:space-between;gap:20px;line-height:1.75;${bold ? "font-weight:700;" : ""}"><span>${label}</span><span style="font-weight:600;">${value}</span></div>`;
+
+  const tooltipFormatter = (raw: unknown): string => {
+    const list = (Array.isArray(raw) ? raw : [raw]) as Array<{ axisValue?: string }>;
+    const date = list.find((p) => p.axisValue)?.axisValue;
+    if (!date) return "";
+    const curStock = stockCloseByDate.get(date) ?? null;
+    const curMa = stockMaByDate.get(date) ?? null;
+    const curIndex = indexCloseByDate.get(date) ?? null;
+
+    let html = `<div style="font-size:11px;color:${C.muted};margin-bottom:4px;">${date}</div>`;
+    html += row(`${dot(C.clay)}收盘价`, f2(curStock));
+    html += row(`${dot(C.blue)}MA${maN}`, f2(curMa));
+    html += row(`${dot(C.amber)}上证指数`, f2(curIndex));
+
+    if (baseStock && baseIndex && curStock != null && curIndex != null) {
+      const stockRet = (curStock / baseStock.close - 1) * 100;
+      const indexRet = (curIndex / baseIndex.close - 1) * 100;
+      const excess = stockRet - indexRet;
+      html += `<div style="border-top:1px dashed ${C.line};margin:6px 0 4px;padding-top:5px;font-size:11px;color:${C.muted};">基准 ${baseStock.date} 起</div>`;
+      html += row("个股收益", `<span style="color:${retColor(stockRet)}">${signPct(stockRet)}</span>`);
+      html += row("指数收益", `<span style="color:${retColor(indexRet)}">${signPct(indexRet)}</span>`);
+      html += row("超额收益", `<span style="color:${retColor(excess)}">${signPct(excess)}</span>`, true);
+    }
+    return html;
+  };
+
   const option: EChartsOption = baseOption({
     legend: {
       data: ["收盘价", `MA${maN}`, "上证指数"],
@@ -60,7 +109,7 @@ function ScreeningChartImpl({
       trigger: "axis",
       axisPointer: { type: "cross", lineStyle: { color: C.muted, type: "dashed" } },
       ...tooltipBase,
-      valueFormatter: (v: unknown) => f2(typeof v === "number" ? v : null),
+      formatter: tooltipFormatter,
     },
     axisPointer: { link: [{ xAxisIndex: "all" }] },
     grid: [
