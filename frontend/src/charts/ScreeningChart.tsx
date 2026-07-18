@@ -6,6 +6,21 @@ import { C, axisBase, baseOption, tooltipBase } from "../theme/echarts";
 
 const MA_N = 20;
 
+// dates 为升序交易日序列。ECharts 类目轴要求 markLine 的 xAxis 精确等于某个类目
+// (交易日),否则静默丢弃。财报公布日常落在周末/节假日/停牌,需先对齐到真实交易日。
+
+/** 返回 >= d 的第一个交易日(财报公布后首个可交易日);无则 null。 */
+function firstTradingDayOnOrAfter(d: string, dates: string[]): string | null {
+  for (const t of dates) if (t >= d) return t;
+  return null;
+}
+
+/** 返回 <= d 的最后一个交易日(用于右边界 Next 截断线);无则 null。 */
+function lastTradingDayOnOrBefore(d: string, dates: string[]): string | null {
+  for (let i = dates.length - 1; i >= 0; i--) if (dates[i] <= d) return dates[i];
+  return null;
+}
+
 interface ScreeningChartProps {
   stock: ChartLinePoint[];
   index: ChartLinePoint[];
@@ -31,20 +46,29 @@ function ScreeningChartImpl({
 }: ScreeningChartProps) {
   const dates = stock.map((p) => p.date);
 
-  const pubMarkLines = pubDates
-    .filter((d) => dates.length === 0 || (d >= dates[0] && d <= dates[dates.length - 1]))
-    .map((d) => ({ xAxis: d, lineStyle: { color: C.muted, type: "dashed" as const, width: 1 } }));
+  // 每个财报公布日对齐到公布后首个交易日,再去重(多个公布日可能落到同一交易日,
+  // 也顺带合并早期年份 ann_date 相邻重复的情况)。落在非交易日不再被 ECharts 丢弃。
+  const pubMarkLines = Array.from(
+    new Set(
+      pubDates
+        .filter((d) => d !== nextPub) // next_pub 由下方 Next 线单独标注,避免右边界重叠
+        .map((d) => firstTradingDayOnOrAfter(d, dates))
+        .filter((d): d is string => d != null),
+    ),
+  ).map((d) => ({ xAxis: d, lineStyle: { color: C.muted, type: "dashed" as const, width: 1 } }));
 
-  const nextMarkLine =
-    nextPub && (dates.length === 0 || nextPub >= dates[0])
-      ? [
-          {
-            xAxis: nextPub,
-            lineStyle: { color: C.clay, type: "dashdot" as const, width: 1.6 },
-            label: { show: true, formatter: `Next\n${nextPub}`, color: C.clay, fontSize: 10, position: "insideEndTop" as const },
-          },
-        ]
-      : [];
+  // Next 截断线标在右边界:对齐到 <= next_pub 的最后一个交易日(股价已由后端截断到
+  // next_pub,故通常即图最右端);label 仍显示真实的下一份财报公布日。
+  const nextAnchor = nextPub ? lastTradingDayOnOrBefore(nextPub, dates) : null;
+  const nextMarkLine = nextAnchor
+    ? [
+        {
+          xAxis: nextAnchor,
+          lineStyle: { color: C.clay, type: "dashdot" as const, width: 1.6 },
+          label: { show: true, formatter: `Next\n${nextPub}`, color: C.clay, fontSize: 10, position: "insideEndTop" as const },
+        },
+      ]
+    : [];
 
   const f2 = (v: number | null | undefined) => (v == null ? "—" : v.toFixed(2));
 

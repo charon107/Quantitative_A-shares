@@ -30,6 +30,8 @@ frontend/.vite/
 .env
 deploy/tushare.env
 prompt.txt
+调用.py
+_gd*.txt
 
 # ===== 编辑器 / 工具 =====
 .idea/
