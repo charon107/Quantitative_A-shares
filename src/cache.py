@@ -74,11 +74,6 @@ def is_available() -> bool:
     return _get_redis() is not None
 
 
-def get_redis():
-    """暴露 Redis 客户端给其他模块（如最近查看持久化）。返回 None 表示不可用。"""
-    return _get_redis()
-
-
 # ========== Key 生成 ==========
 def _make_key(func_name: str, params: dict[str, object] | None = None) -> str:
     """构建确定性的 Redis key。仅 func_name + 指定 params 参与哈希。"""
@@ -235,28 +230,6 @@ def invalidate_all() -> int:
         logger.info("Redis 缓存已清空: %d 个 key", deleted)
     except Exception as exc:
         logger.warning("Redis 清空失败: %s", exc)
-    return deleted
-
-
-def invalidate_func(func_name: str) -> int:
-    """清空指定函数的所有缓存 key。返回删除数。"""
-    r = _get_redis()
-    if r is None:
-        return 0
-    pattern = f"{CACHE_VERSION}:{func_name}:*"
-    deleted = 0
-    try:
-        cursor = 0
-        while True:
-            cursor, keys = r.scan(cursor, match=pattern, count=100)
-            if keys:
-                meta_keys = [f"{k}:meta" for k in keys]
-                r.delete(*(list(keys) + meta_keys))
-                deleted += len(keys)
-            if cursor == 0:
-                break
-    except Exception as exc:
-        logger.warning("Redis 清空 %s 失败: %s", func_name, exc)
     return deleted
 
 

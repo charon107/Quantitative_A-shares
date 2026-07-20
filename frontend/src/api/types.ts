@@ -13,12 +13,6 @@ export interface IndexPoint {
   value: number | null;
 }
 
-export interface LimitPoint {
-  date: string;
-  limit_up: number;
-  limit_down: number;
-}
-
 export interface BreadthPoint {
   date: string;
   up: number;

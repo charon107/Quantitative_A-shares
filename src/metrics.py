@@ -247,13 +247,6 @@ def add_moving_averages(df: pd.DataFrame, windows=MA_WINDOWS) -> pd.DataFrame:
     return out
 
 
-def rolling_volatility(code: str, window: int = 20, path: str | None = None) -> pd.Series:
-    """个股滚动年化波动率（日收益标准差 * sqrt(252)）。"""
-    df = load_stock_kline(code, path=path)
-    daily_return = df["close"].pct_change()
-    return daily_return.rolling(window=window).std() * np.sqrt(252)
-
-
 def volatility_frame(code: str, window: int = 20, path: str | None = None) -> pd.DataFrame:
     """带日期的滚动波动率。列：date / value（单次查询）。"""
     df = load_stock_kline(code, path=path)

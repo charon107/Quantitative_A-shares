@@ -8,7 +8,6 @@ import type {
   EarningsNews,
   HotStock,
   IndexPoint,
-  LimitPoint,
   MaDuration,
   QuarterlyFundamental,
   RankMetric,
@@ -47,9 +46,6 @@ export const useShanghaiEqualWeightIndex = (start: string) =>
     queryKey: ["shewi", start],
     queryFn: () => get<IndexPoint[]>(`/market/shanghai-equal-weight-index?start=${start}`),
   });
-
-export const useLimitUpDown = () =>
-  useQuery({ queryKey: ["lud"], queryFn: () => get<LimitPoint[]>("/market/limit-up-down") });
 
 export const useBreadthSeries = () =>
   useQuery({ queryKey: ["breadthSeries"], queryFn: () => get<BreadthPoint[]>("/market/breadth-series") });
