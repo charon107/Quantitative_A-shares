@@ -30,7 +30,7 @@ src/
     └── tushare_client.py       # tushare 封装（token/限流/熔断/前复权）
 frontend/                       # Vite + React + TS + Tailwind + ECharts
 scripts/migrate_parquet_to_duckdb.py   # 一次性：旧 parquet → DuckDB
-deploy/                         # systemd 单元 + 数据刷新 + 缓存预热
+deploy/                         # systemd 单元 + 代码更新 + 缓存预热 + 备份导出
 tests/                          # pytest（metrics + API + 分析）
 ```
 
@@ -79,7 +79,9 @@ cd frontend && npm run build      # 产出 frontend/dist/
 
 ## 数据更新
 
-每日由 systemd timer 触发 `deploy/refresh_data.sh`：跑 `stock_price.py`（tushare → DuckDB 增量入库）→ 清 Redis 缓存。需在服务器配置环境变量 `TUSHARE_TOKEN`（及可选 `TUSHARE_API_URL` 代理网关）。
+每日由 GitHub Actions（`.github/workflows/daily_ingest.yml`）驱动：runner 抓 tushare 数据存 parquet → scp 到服务器 → 服务器跑 `scripts/load_all_parquet.py` 重算前复权入库 → 清/预热 Redis。全程不在服务器侧调用网关（服务器 → 网关网络不通）。需配置 secrets `TUSHARE_TOKEN`（及可选 `TUSHARE_API_URL` 代理网关）。
+
+财务/估值等低频数据分别由 `fundamentals_refresh.yml`、`valuation_backfill.yml` 维护。
 
 ## 部署
 

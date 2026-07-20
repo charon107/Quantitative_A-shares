@@ -16,7 +16,7 @@ cd /root/Quantitative_A-shares/WechatNum
 git pull origin main
 uv sync                       # 安装 duckdb/fastapi/uvicorn 等
 
-# 1) 从历史 parquet 迁移到 DuckDB（一次性；之后由 refresh_data 增量入库）
+# 1) 从历史 parquet 迁移到 DuckDB（一次性；之后由 GitHub Actions 增量入库）
 uv run python scripts/migrate_parquet_to_duckdb.py \
     --base-dir 股价数据_parquet_fq --dest market.duckdb
 
@@ -25,33 +25,27 @@ uv run python scripts/migrate_parquet_to_duckdb.py \
 
 # 3) 安装 systemd 单元
 cp deploy/api.service /etc/systemd/system/
-# refresh_data：把 deploy/refresh_data.sh 作为 oneshot service，由 timer 触发
 systemctl daemon-reload
 systemctl enable --now api
-systemctl enable --now refresh_data.timer   # 每日入库
 
 # 4) 预热缓存
 uv run python deploy/warmup_redis.py
 ```
 
-## refresh_data oneshot service（供 timer 调用）
+## 数据入库（由 GitHub Actions 驱动，服务器无 timer）
 
-```ini
-# /etc/systemd/system/refresh_data.service
-[Unit]
-Description=Refresh A股数据（tushare -> DuckDB）+ 清/预热 Redis
-After=network.target
+服务器**不**主动抓数据——「服务器 → tushare 网关」网络不通。全部入库由 runner 发起：
 
-[Service]
-Type=oneshot
-User=root
-WorkingDirectory=/root/Quantitative_A-shares/WechatNum
-Environment="TUSHARE_TOKEN=YOUR_TOKEN"
-Environment="DUCKDB_PATH=/root/Quantitative_A-shares/WechatNum/market.duckdb"
-ExecStart=/root/Quantitative_A-shares/WechatNum/deploy/refresh_data.sh
-```
+| workflow | 频率 | 服务器侧动作 |
+|---|---|---|
+| `daily_ingest.yml` | 工作日 17:17 / 19:17（北京） | `scripts/load_all_parquet.py` 重算前复权入库 + 清/预热 Redis |
+| `fundamentals_refresh.yml` | 财报季次月上旬 | `scripts/load_fundamentals.py` + 跑逐年选股 |
+| `valuation_backfill.yml` | 手动（首次/重建） | `scripts/load_valuation.py` |
+| `db_backup.yml` | 每周 | `deploy/export_backup.py` 导出快照供 runner 拉回上传 HF |
 
-> 需在该 service 配置 `TUSHARE_TOKEN`（及可选 `TUSHARE_API_URL` 代理网关）。
+> 早期的 `refresh_data.sh` + `refresh_data.timer`（服务器侧直连 tushare）已随该架构切换废弃并删除。
+> 若服务器上仍有残留单元：`systemctl disable --now refresh_data.timer` 后删除
+> `/etc/systemd/system/refresh_data.{service,timer}`。
 
 ## 日常更新
 
@@ -91,6 +85,6 @@ ufw allow 8501       # 或 iptables 放行 8501
 
 ## 备注
 
-- DuckDB 并发：API 用只读短连接；入库 `refresh_data` 写临时库后原子替换，避免争锁。
+- DuckDB 并发：API 用只读短连接；入库脚本写临时库后原子替换，避免争锁。
 - 内存：`api.service` 设 `DUCKDB_MEMORY_LIMIT=400MB`、uvicorn 单 worker，适配 1.6GB 机器。
 - 旧的 `dashboard.service`（Streamlit）已废弃；如仍在系统里：`systemctl disable --now dashboard` 后删除单元文件。
