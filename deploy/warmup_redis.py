@@ -51,31 +51,25 @@ bs = metrics.breadth_series()
 cache.save("load_breadth_series", bs, ttl=86400)
 _log("breadth_series", len(bs), t0)
 
-# 5. 涨停/跌停家数序列（大盘概览，全表聚合）
-t0 = time.time()
-lud = metrics.limit_up_down_series()
-cache.save("load_limit_up_down", lud, ttl=86400)
-_log("limit_up_down", len(lud), t0)
-
-# 6. MA 多头时长样本（最耗时，TTL 7 天）
+# 5. MA 多头时长样本（最耗时，TTL 7 天）
 t0 = time.time()
 ma = metrics.ma_duration_samples()
 cache.save("load_ma_duration_samples", ma, ttl=86400 * 7)
 _log("ma_duration_samples", len(ma), t0)
 
-# 7. 代码->名称映射
+# 6. 代码->名称映射
 t0 = time.time()
 nm = metrics.name_map()
 cache.save("load_name_map", nm, ttl=86400)
 _log("name_map", len(nm), t0)
 
-# 8. 同花顺人气榜
+# 7. 同花顺人气榜
 t0 = time.time()
 hot = metrics.hot_stocks(12)
 cache.save("load_hot_stocks", hot, ttl=86400)
 _log("hot_stocks", len(hot), t0)
 
-# 9. 基本面选股：最新一年的选股结果（年份列表是 list，cache 层不支持，查询本身极轻）
+# 8. 基本面选股：最新一年的选股结果（年份列表是 list，cache 层不支持，查询本身极轻）
 t0 = time.time()
 years = metrics.selection_years()
 n_sel = 0

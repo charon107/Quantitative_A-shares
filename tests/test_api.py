@@ -29,12 +29,6 @@ def test_equal_weight_index(duck):
     assert {"date", "value"} == set(pts[0].keys())
 
 
-def test_limit_up_down(duck):
-    r = client.get("/api/market/limit-up-down")
-    assert r.status_code == 200
-    assert sum(p["limit_up"] for p in r.json()) == 1
-
-
 def test_search(duck):
     r = client.get("/api/stocks/search", params={"q": "银行"})
     assert r.status_code == 200

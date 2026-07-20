@@ -17,12 +17,6 @@ class IndexPoint(BaseModel):
     value: float | None
 
 
-class LimitPoint(BaseModel):
-    date: str
-    limit_up: int
-    limit_down: int
-
-
 class BreadthPoint(BaseModel):
     date: str
     up: int

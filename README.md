@@ -69,7 +69,6 @@ cd frontend && npm run build      # 产出 frontend/dist/
 |------|------|------|
 | GET | `/api/market/breadth` | 市场宽度（涨跌家数 / 涨跌比） |
 | GET | `/api/market/equal-weight-index?start=` | 等权指数累计收益 |
-| GET | `/api/market/limit-up-down` | 每日涨停/跌停家数 |
 | GET | `/api/stocks/search?q=` | 代码/名称模糊搜索 |
 | GET | `/api/stocks/{code}/kline` | 个股 K线（含 MA5/10/20/60） |
 | GET | `/api/stocks/{code}/volatility?window=` | 滚动年化波动率 |

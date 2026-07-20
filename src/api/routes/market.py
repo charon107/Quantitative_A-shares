@@ -35,11 +35,6 @@ def shanghai_equal_weight_index(start: str = services.DEFAULT_START):
     return series_to_points(services.shanghai_equal_weight_index(start))
 
 
-@router.get("/limit-up-down", response_model=list[schemas.LimitPoint])
-def limit_up_down():
-    return df_to_records(services.limit_up_down())
-
-
 @router.get("/breadth-series", response_model=list[schemas.BreadthPoint])
 def breadth_series():
     """每日市场涨跌家数（上涨/下跌/涨停/跌停）走势。"""

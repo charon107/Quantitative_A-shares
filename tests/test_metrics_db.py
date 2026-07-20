@@ -33,9 +33,9 @@ def test_equal_weighted_index_cumulative(duck):
     assert s.notna().all()
 
 
-def test_limit_up_down_detects_injected_limit(duck):
-    df = metrics.limit_up_down_series()
-    assert "limit_up" in df.columns and "limit_down" in df.columns
+def test_breadth_series_detects_injected_limit(duck):
+    df = metrics.breadth_series()
+    assert {"up", "down", "limit_up", "limit_down"} <= set(df.columns)
     # 合成数据里注入了恰好 1 个涨停
     assert int(df["limit_up"].sum()) == 1
 

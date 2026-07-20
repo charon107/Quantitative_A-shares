@@ -36,11 +36,6 @@ def shanghai_equal_weight_index(start_date: str = DEFAULT_START) -> pd.Series:
     return res if res is not None else pd.Series(dtype=float)
 
 
-def limit_up_down() -> pd.DataFrame:
-    res, _ = cache.try_load("load_limit_up_down", fallback_fn=metrics.limit_up_down_series, ttl=86400)
-    return res if res is not None else pd.DataFrame()
-
-
 def breadth_series() -> pd.DataFrame:
     res, _ = cache.try_load("load_breadth_series", fallback_fn=metrics.breadth_series, ttl=86400)
     return res if res is not None else pd.DataFrame()

@@ -94,35 +94,7 @@ def shanghai_equal_weighted_index(
     return (1 + s).cumprod() - 1
 
 
-# ========== 涨停/跌停家数 ==========
-def limit_up_down_series(
-    up_threshold: float = 9.9,
-    down_threshold: float = -9.9,
-    start_date: str = config.DASHBOARD_START_DATE,
-    path: str | None = None,
-) -> pd.DataFrame:
-    """每日涨停/跌停家数走势（看板窗口内）。列：date / limit_up / limit_down。"""
-    df = db.query_df(
-        """
-        SELECT date,
-               SUM(CASE WHEN pctChg >= ? THEN 1 ELSE 0 END) AS limit_up,
-               SUM(CASE WHEN pctChg <= ? THEN 1 ELSE 0 END) AS limit_down
-        FROM kline
-        WHERE date >= ?
-        GROUP BY date
-        ORDER BY date
-        """,
-        [up_threshold, down_threshold, start_date],
-        path=path,
-    )
-    if df.empty:
-        return df
-    df["limit_up"] = df["limit_up"].astype(int)
-    df["limit_down"] = df["limit_down"].astype(int)
-    return df
-
-
-# ========== 个股 K线 ==========
+# ========== 市场宽度（涨跌家数 + 涨跌停家数） ==========
 def breadth_series(
     up_threshold: float = 9.9,
     down_threshold: float = -9.9,
@@ -227,6 +199,7 @@ def day_movers(date: str, path: str | None = None) -> pd.DataFrame:
     )
 
 
+# ========== 个股 K线 ==========
 def load_stock_kline(code: str, path: str | None = None) -> pd.DataFrame:
     """单只股票完整 K线（按日期升序）。无数据抛 LookupError。"""
     df = db.query_df(
