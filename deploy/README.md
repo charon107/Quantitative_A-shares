@@ -16,9 +16,10 @@ cd /root/Quantitative_A-shares/WechatNum
 git pull origin main
 uv sync                       # 安装 duckdb/fastapi/uvicorn 等
 
-# 1) 从历史 parquet 迁移到 DuckDB（一次性；之后由 GitHub Actions 增量入库）
-uv run python scripts/migrate_parquet_to_duckdb.py \
-    --base-dir 股价数据_parquet_fq --dest market.duckdb
+# 1) 建库（一次性；之后由 GitHub Actions 增量入库）
+#    优先从 HF 快照恢复，见下方「备份与恢复」；或本地 reingest_all.py 全量重抓后
+#    走 .github/workflows/deploy_db.yml 推送
+DUCKDB_PATH=market.duckdb uv run python scripts/restore_from_backup.py <快照目录>
 
 # 2) 传入前端构建产物（本地构建后）
 #    本地：scp -r frontend/dist root@47.109.138.67:/root/Quantitative_A-shares/WechatNum/frontend/
@@ -80,7 +81,7 @@ ufw allow 8501       # 或 iptables 放行 8501
   上传到 Hugging Face 私有 dataset（需 secrets `HF_TOKEN` + `HF_BACKUP_REPO`），保留 8 份。
 - **从快照恢复**：下载某个 `snapshots/YYYY-MM-DD/` 目录到服务器后：
   `DUCKDB_PATH=... uv run python scripts/restore_from_backup.py <目录>`（自动校验 manifest 行数）。
-- **schema 迁移**：`scripts/migrate_schema_v2.py`（幂等，版本号存 `meta_kv`）；
+- **schema 迁移**：`scripts/archive/migrate_schema_v2.py`（已完成；幂等，版本号存 `meta_kv`）；
   迁移前后用 `scripts/db_size_report.py` 对比体积。
 
 ## 备注

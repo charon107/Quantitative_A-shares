@@ -29,7 +29,7 @@ src/
     ├── stock_price.py          # tushare → DuckDB 增量入库
     └── tushare_client.py       # tushare 封装（token/限流/熔断/前复权）
 frontend/                       # Vite + React + TS + Tailwind + ECharts
-scripts/migrate_parquet_to_duckdb.py   # 一次性：旧 parquet → DuckDB
+scripts/                        # 抓取(fetch_*)/入库(load_*)/运维；archive/ 为已完成的一次性脚本
 deploy/                         # systemd 单元 + 代码更新 + 缓存预热 + 备份导出
 tests/                          # pytest（metrics + API + 分析）
 ```
@@ -41,8 +41,8 @@ tests/                          # pytest（metrics + API + 分析）
 ```bash
 uv sync --all-extras
 
-# 首次：从历史 parquet 建库（或在服务器已迁移好的库上跳过）
-uv run python scripts/migrate_parquet_to_duckdb.py --base-dir 股价数据_parquet_fq --dest market.duckdb
+# 建库：从生产快照恢复（推荐），或用 scripts/reingest_all.py 全量重抓
+#   DUCKDB_PATH=market.duckdb uv run python scripts/restore_from_backup.py <快照目录>
 
 # 启动 API（开发期 8000）
 DUCKDB_PATH=market.duckdb uv run uvicorn src.api.main:app --reload --port 8000

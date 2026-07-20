@@ -118,7 +118,7 @@ class TestMigrateSchemaV2:
 
     def test_migrate_drops_adjustflag_and_sets_version(self, legacy_db):
         # Act
-        from scripts.migrate_schema_v2 import migrate
+        from scripts.archive.migrate_schema_v2 import migrate
 
         migrate(legacy_db)
 
@@ -133,7 +133,7 @@ class TestMigrateSchemaV2:
             assert db.get_meta("schema_version", conn) == str(db.SCHEMA_VERSION)
 
     def test_migrate_is_idempotent(self, legacy_db, capsys):
-        from scripts.migrate_schema_v2 import migrate
+        from scripts.archive.migrate_schema_v2 import migrate
 
         migrate(legacy_db)
         migrate(legacy_db)  # 第二次应跳过
