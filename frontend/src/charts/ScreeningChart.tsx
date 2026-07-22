@@ -137,8 +137,9 @@ function ScreeningChartImpl({
     },
     axisPointer: { link: [{ xAxisIndex: "all" }] },
     grid: [
-      { left: 56, right: 18, top: 36, height: "56%" },
-      { left: 56, right: 18, top: "72%", height: "18%" },
+      // 两个 y 轴都在右侧,故右留白要够放刻度数字(如 16.082)与轴名,左侧无标签可收窄
+      { left: 44, right: 56, top: 36, height: "56%" },
+      { left: 44, right: 56, top: "72%", height: "18%" },
     ],
     xAxis: [
       { type: "category", data: dates, gridIndex: 0, ...axisBase, boundaryGap: false, axisLabel: { ...axisBase.axisLabel, show: false } },

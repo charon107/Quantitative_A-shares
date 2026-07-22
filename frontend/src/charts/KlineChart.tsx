@@ -136,8 +136,9 @@ function KlineChartImpl({
       brushStyle: { borderColor: C.clay, borderWidth: 1, color: "rgba(204,120,92,0.10)" },
     },
     grid: [
-      { left: 56, right: 18, top: 36, height: "62%" },
-      { left: 56, right: 18, top: "74%", height: "16%" },
+      // 两个 y 轴都在右侧,右留白要够放价格/量刻度数字,左侧无标签可收窄
+      { left: 44, right: 56, top: 36, height: "62%" },
+      { left: 44, right: 56, top: "74%", height: "16%" },
     ],
     xAxis: [
       { type: "category", data: dates, gridIndex: 0, ...axisBase, boundaryGap: true, axisLabel: { ...axisBase.axisLabel, show: false } },
