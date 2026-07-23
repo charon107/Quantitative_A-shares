@@ -80,6 +80,15 @@ class SearchRow(BaseModel):
     code_name: str | None
 
 
+class QuoteRow(BaseModel):
+    """单只股票最新一行行情快照（收藏列表用）。停牌/退市股为最后已知行情。"""
+    code: str
+    code_name: str | None = None
+    date: str | None = None
+    close: float | None = None
+    pctChg: float | None = None
+
+
 class HotStock(BaseModel):
     code: str
     code_name: str | None = None

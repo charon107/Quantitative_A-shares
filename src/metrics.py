@@ -242,6 +242,29 @@ def top_movers(
 
 
 # ========== 名称映射 / 搜索 ==========
+def latest_quotes(codes: list[str], path: str | None = None) -> pd.DataFrame:
+    """多只股票各自最新一行的行情快照。列：code / code_name / date / close / pctChg。
+
+    按每只股票各自的最后一条记录取（不用全库 MAX(date) 锚定）——收藏列表
+    场景下停牌/退市股也要展示其最后已知行情，由前端对缺失 code 显示 "—"。
+    """
+    if not codes:
+        return pd.DataFrame(columns=["code", "code_name", "date", "close", "pctChg"])
+    placeholders = ", ".join(["?"] * len(codes))
+    return db.query_df(
+        f"""
+        SELECT k.code, m.code_name, k.date, k.close, k.pctChg
+        FROM kline k
+        LEFT JOIN stock_meta m ON m.code = k.code
+        WHERE k.code IN ({placeholders})
+        QUALIFY row_number() OVER (PARTITION BY k.code ORDER BY k.date DESC) = 1
+        ORDER BY k.code
+        """,
+        codes,
+        path=path,
+    )
+
+
 def name_map(path: str | None = None) -> dict:
     """代码 -> 公司名称映射。无表/无数据返回空字典。"""
     try:

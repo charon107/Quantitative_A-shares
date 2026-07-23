@@ -35,6 +35,20 @@ def test_search(duck):
     assert {row["code"] for row in r.json()} == {"sh.600000", "sz.000001"}
 
 
+def test_quotes(duck):
+    r = client.get("/api/stocks/quotes", params={"codes": "sh.600000,sh.600519,sh.999999"})
+    assert r.status_code == 200
+    rows = r.json()
+    assert {row["code"] for row in rows} == {"sh.600000", "sh.600519"}
+    row = next(x for x in rows if x["code"] == "sh.600000")
+    assert row["code_name"] == "浦发银行"
+    assert row["close"] is not None and row["pctChg"] is not None and row["date"] is not None
+
+
+def test_quotes_requires_codes(duck):
+    assert client.get("/api/stocks/quotes").status_code == 422
+
+
 def test_kline_with_ma(duck):
     r = client.get("/api/stocks/sh.600000/kline")
     assert r.status_code == 200

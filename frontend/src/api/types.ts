@@ -76,6 +76,14 @@ export interface SearchRow {
   code_name: string | null;
 }
 
+export interface QuoteRow {
+  code: string;
+  code_name: string | null;
+  date: string | null;
+  close: number | null;
+  pctChg: number | null;
+}
+
 export interface HotStock {
   code: string;
   code_name: string | null;

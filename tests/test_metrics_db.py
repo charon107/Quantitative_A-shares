@@ -80,6 +80,18 @@ def test_name_map_and_search(duck):
     assert set(by_code["code"]) == {"sh.600000", "sh.600519"}
 
 
+def test_latest_quotes(duck):
+    df = metrics.latest_quotes(["sh.600000", "sh.600519", "sh.999999"])
+    # 未命中代码被剔除，每只各一行、取各自最新日期
+    assert set(df["code"]) == {"sh.600000", "sh.600519"}
+    k = metrics.load_stock_kline("sh.600000")
+    row = df[df["code"] == "sh.600000"].iloc[0]
+    assert row["code_name"] == "浦发银行"
+    assert row["close"] == pytest.approx(k["close"].iloc[-1])
+    assert row["pctChg"] == pytest.approx(k["pctChg"].iloc[-1])
+    assert metrics.latest_quotes([]).empty
+
+
 def test_ma_duration_samples_shape(duck):
     df = metrics.ma_duration_samples("2025-01-01")
     assert set(df.columns) == {"code", "start_date", "end_date", "duration", "ongoing"}

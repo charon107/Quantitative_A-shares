@@ -257,6 +257,7 @@ SELECT code, MAX(date) AS 最新, COUNT(*) AS 天数 FROM kline GROUP BY code LI
 | `GET /api/stocks/{code}/dividend` | 分红历史 |
 | `GET /api/stocks/{code}/earnings` | 业绩预告 + 快报 |
 | `GET /api/stocks/{code}/info` | 公司信息 |
+| `GET /api/stocks/quotes?codes=a,b,c` | 批量最新行情快照（每只各自最新一行；未命中不返回，上限 200 只） |
 | `GET /api/screening/years`、`/api/screening/{year}` | 选股年份 / 某年选股池 |
 | `GET /api/export/kline.parquet` | 全量 K线 Parquet 下载 |
 

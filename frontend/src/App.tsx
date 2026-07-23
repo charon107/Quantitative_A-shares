@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Overview } from "./pages/Overview";
 import { StockQuery } from "./pages/StockQuery";
+import { Favorites } from "./pages/Favorites";
 import { Rankings } from "./pages/Rankings";
 import { Screening } from "./pages/Screening";
 import { MaDuration } from "./pages/MaDuration";
@@ -10,6 +11,7 @@ import { useStatus } from "./api/client";
 const PAGES = [
   { key: "overview", label: "大盘概览" },
   { key: "stock", label: "个股查询" },
+  { key: "favorites", label: "我的收藏" },
   { key: "rankings", label: "排行榜" },
   { key: "screening", label: "基本面选股" },
   { key: "maDuration", label: "多头时长" },
@@ -101,8 +103,11 @@ export default function App() {
             initialCode={queryCode}
             focus={queryFocus}
             onBack={queryFrom ? () => setPage(queryFrom) : undefined}
-            backLabel={queryFrom === "maDuration" ? "返回多头时长" : "返回"}
+            backLabel={`返回${PAGES.find((p) => p.key === queryFrom)?.label ?? ""}`}
           />
+        )}
+        {page === "favorites" && (
+          <Favorites onOpenStock={(code) => openStock(code, null, "favorites")} />
         )}
         {page === "rankings" && <Rankings onOpenStock={openStock} />}
         {page === "screening" && <Screening onOpenStock={openStock} />}

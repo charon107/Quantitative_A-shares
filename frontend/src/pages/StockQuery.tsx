@@ -11,6 +11,7 @@ import { FundamentalPanel } from "../components/FundamentalPanel";
 import { RangeStatsPanel } from "../components/RangeStatsPanel";
 import { ValuationPanel } from "../components/ValuationPanel";
 import { FullscreenOverlay } from "../components/FullscreenOverlay";
+import { FavoriteStar } from "../components/FavoriteStar";
 import { HotStocks } from "../components/HotStocks";
 import { KlineChart } from "../charts/KlineChart";
 import { VolatilityChart } from "../charts/VolatilityChart";
@@ -65,6 +66,7 @@ export function StockQuery({
         <SearchBox onPick={setCode} />
         {kline.data && (
           <div className="flex items-baseline gap-2">
+            <FavoriteStar code={kline.data.code} name={kline.data.code_name} />
             <span className="text-lg font-semibold">{kline.data.code_name ?? kline.data.code}</span>
             <span className="nums text-sm text-muted">{kline.data.code}</span>
           </div>

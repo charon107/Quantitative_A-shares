@@ -15,6 +15,13 @@ def search(q: str = Query(..., min_length=1), limit: int = Query(50, ge=1, le=20
     return df_to_records(metrics.search_stocks(q, limit))
 
 
+@router.get("/quotes", response_model=list[schemas.QuoteRow])
+def quotes(codes: str = Query(..., min_length=1)):
+    """批量最新行情快照。codes 为逗号分隔代码，去重后上限 200 只；未命中的不返回。"""
+    code_list = list(dict.fromkeys(c.strip() for c in codes.split(",") if c.strip()))[:200]
+    return df_to_records(metrics.latest_quotes(code_list))
+
+
 @router.get("/{code}/kline", response_model=schemas.StockKline)
 def kline(code: str):
     try:

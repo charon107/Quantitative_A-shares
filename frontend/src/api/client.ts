@@ -10,6 +10,7 @@ import type {
   IndexPoint,
   MaDuration,
   QuarterlyFundamental,
+  QuoteRow,
   RankMetric,
   RankingRow,
   ScreeningChart,
@@ -74,6 +75,16 @@ export const useSearch = (q: string) =>
     enabled: q.trim().length > 0,
     staleTime: 60_000,
   });
+
+// 批量最新行情（收藏列表）。queryKey 用排序后的 code 串，保证同集合命中同一缓存
+export const useQuotes = (codes: string[]) => {
+  const key = [...codes].sort().join(",");
+  return useQuery({
+    queryKey: ["quotes", key],
+    queryFn: () => get<QuoteRow[]>(`/stocks/quotes?codes=${encodeURIComponent(key)}`),
+    enabled: codes.length > 0,
+  });
+};
 
 export const useKline = (code: string | null) =>
   useQuery({
