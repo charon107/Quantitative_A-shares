@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useEarningsCalendarDates, useEarningsCalendarDay } from "../api/client";
 import type { EarningsCalendarRow } from "../api/types";
 import { Card, CardHeader } from "../components/Card";
@@ -109,7 +109,26 @@ export function EarningsCalendar({ onOpenStock }: { onOpenStock: (code: string) 
   const [filter, setFilter] = useState<TypeFilter>("all");
   const [onlyFav, setOnlyFav] = useState(false);
   const [showAll, setShowAll] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const pickerRef = useRef<HTMLDivElement>(null);
   const { isFavorite } = useFavorites();
+
+  // 迷你日历弹层：点击外部或 Escape 关闭
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) setPickerOpen(false);
+    };
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "Escape") setPickerOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [pickerOpen]);
 
   // month 为 null 时后端返回最近 120 天 + 最近披露日，用于初始定位
   const dates = useEarningsCalendarDates(month);
@@ -139,6 +158,12 @@ export function EarningsCalendar({ onOpenStock }: { onOpenStock: (code: string) 
   const shown = showAll ? rows : rows.slice(0, INITIAL_ROWS);
   const today = todayStr();
 
+  // 迷你日历的年份下拉：当前年往前 15 年（倒序，新年份在前）
+  const pickerYears = useMemo(() => {
+    const end = new Date().getFullYear();
+    return Array.from({ length: 16 }, (_, i) => end - i);
+  }, []);
+
   const pickDate = (date: string) => {
     setSelected(date);
     setShowAll(false);
@@ -153,12 +178,120 @@ export function EarningsCalendar({ onOpenStock }: { onOpenStock: (code: string) 
           subtitle="按公告日查看全市场财报披露 · 财报季内每日更新"
           right={
             dates.data?.latest_date && (
-              <button
-                onClick={() => pickDate(dates.data!.latest_date!)}
-                className="shrink-0 rounded-lg border border-line px-2.5 py-1 text-xs text-muted transition hover:border-clay hover:text-clay"
-              >
-                最近披露日 {dates.data.latest_date}
-              </button>
+              <div ref={pickerRef} className="relative shrink-0">
+                <button
+                  onClick={() => setPickerOpen((o) => !o)}
+                  className="flex items-center gap-1 rounded-lg border border-line px-2.5 py-1 text-xs text-muted transition hover:border-clay hover:text-clay"
+                >
+                  最近披露日 {dates.data.latest_date}
+                  <svg
+                    className={`h-3 w-3 transition-transform ${pickerOpen ? "rotate-180" : ""}`}
+                    viewBox="0 0 20 20"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                  >
+                    <path d="M6 8l4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
+                {pickerOpen && month && (
+                  <div className="absolute right-0 z-20 mt-2 w-64 rounded-xl border border-line bg-panel p-3 shadow-lift">
+                    <div className="mb-2 flex items-center justify-between gap-1">
+                      <button
+                        onClick={() => setMonth(shiftMonth(month, -1))}
+                        className="rounded-md px-1.5 py-0.5 text-sm text-muted transition hover:bg-panel2 hover:text-ink"
+                        aria-label="上个月"
+                      >
+                        ‹
+                      </button>
+                      <div className="flex gap-1">
+                        <select
+                          value={Number(month.slice(0, 4))}
+                          onChange={(e) => setMonth(`${e.target.value}-${month.slice(5, 7)}`)}
+                          className="nums rounded-md border border-line bg-panel px-1 py-0.5 text-xs text-ink outline-none transition focus:border-clay"
+                          aria-label="选择年份"
+                        >
+                          {pickerYears.map((y) => (
+                            <option key={y} value={y}>
+                              {y}年
+                            </option>
+                          ))}
+                        </select>
+                        <select
+                          value={Number(month.slice(5, 7))}
+                          onChange={(e) =>
+                            setMonth(`${month.slice(0, 4)}-${String(Number(e.target.value)).padStart(2, "0")}`)
+                          }
+                          className="nums rounded-md border border-line bg-panel px-1 py-0.5 text-xs text-ink outline-none transition focus:border-clay"
+                          aria-label="选择月份"
+                        >
+                          {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+                            <option key={m} value={m}>
+                              {m}月
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <button
+                        onClick={() => setMonth(shiftMonth(month, 1))}
+                        className="rounded-md px-1.5 py-0.5 text-sm text-muted transition hover:bg-panel2 hover:text-ink"
+                        aria-label="下个月"
+                      >
+                        ›
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-7 gap-0.5 text-center">
+                      {WEEKDAYS.map((w) => (
+                        <div key={w} className="py-0.5 text-[9px] text-muted">
+                          {w}
+                        </div>
+                      ))}
+                      {buildMonthCells(month).map((d, i) => {
+                        if (d == null) return <div key={`b${i}`} />;
+                        const date = `${month}-${String(d).padStart(2, "0")}`;
+                        const count = countByDate.get(date) ?? 0;
+                        const isFuture = date > today;
+                        const isSelected = date === selected;
+                        return (
+                          <button
+                            key={date}
+                            disabled={isFuture}
+                            onClick={() => {
+                              pickDate(date);
+                              setPickerOpen(false);
+                            }}
+                            className={`flex flex-col items-center rounded-md py-0.5 transition ${
+                              isSelected
+                                ? "bg-clay/10 ring-1 ring-clay"
+                                : isFuture
+                                  ? "text-muted/40"
+                                  : "hover:bg-panel2"
+                            }`}
+                          >
+                            <span className={`nums text-[11px] ${isSelected ? "font-semibold text-clay" : "text-ink"}`}>
+                              {d}
+                            </span>
+                            <span
+                              className={`nums text-[8px] leading-tight ${count > 0 ? "text-clay" : "text-transparent"}`}
+                            >
+                              {count > 0 ? count : "·"}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <button
+                      onClick={() => {
+                        pickDate(dates.data!.latest_date!);
+                        setPickerOpen(false);
+                      }}
+                      className="mt-2 w-full rounded-lg py-1 text-[11px] text-muted transition hover:bg-panel2 hover:text-clay"
+                    >
+                      回到最近披露日
+                    </button>
+                  </div>
+                )}
+              </div>
             )
           }
         />
