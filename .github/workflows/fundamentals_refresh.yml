@@ -1,14 +1,18 @@
 name: 基本面财务刷新 + 逐年选股
 
-# 财务数据变动频率低（年报+一季报 4 月、半年报 8 月、三季报 10 月披露），无需每日抓。
-# runner 抓 fina_indicator/income/cashflow/balancesheet（全部报告期，年度+季度双组装）
+# 财务数据变动频率低（年报+一季报 4 月、半年报 8 月、三季报 10 月披露），全量一年三次即可。
+# 但财报季内需要每日时效（财报日历功能）：窗口期（1-4 月 / 7-8 月 / 10 月）每天
+# 北京 19:32 按公告日增量抓取当日披露名单（scripts/fetch_earnings_daily.py），
+# 只补名单内股票，服务器 upsert（--incremental，跳过选股与退市清理）。
+# 全量：runner 抓 fina_indicator/income/cashflow/balancesheet（全部报告期，年度+季度双组装）
 # + dividend/forecast/express + index_daily -> parquet，scp 到服务器，
 # 服务器 upsert stock_fundamental(_quarterly)/dividend/forecast/express/index_daily
 # -> 跑逐年选股写 selected_stocks。现行 cron 均落在季报法定披露期限之后，
 # 季度数据一并刷新。与每日日线入库（daily_ingest.yml）解耦，避免限频压力。
 on:
   schedule:
-    - cron: "23 1 5 5,9,11 *"   # 财报季次月上旬各跑一次（北京 09:23 前后）
+    - cron: "23 1 5 5,9,11 *"   # 财报季次月上旬全量各跑一次（北京 09:23 前后）
+    - cron: "32 11 * * *"       # 每日增量（北京 19:32）；窗口外步骤内秒退
   workflow_dispatch:
     inputs:
       full:
@@ -23,8 +27,8 @@ concurrency:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    # 每股 7 次调用（fina/income/cashflow/balancesheet/dividend/forecast/express），
-    # 3200 只 @90次/分 ≈ 249 分钟
+    # 全量：每股 7 次调用（fina/income/cashflow/balancesheet/dividend/forecast/express），
+    # 3200 只 @90次/分 ≈ 249 分钟；增量峰值日 ~300 只 ≈ 25 分钟
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
@@ -32,7 +36,28 @@ jobs:
           fetch-depth: 0   # 打 git bundle 需要完整历史
       - uses: astral-sh/setup-uv@v5
 
-      - name: runner 抓财务/指数 -> parquet
+      - name: 判断运行模式（全量 / 财报季每日增量 / 窗口外跳过）
+        id: mode
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.event.schedule }}" = "23 1 5 5,9,11 *" ]; then
+            echo "mode=full" >> "$GITHUB_OUTPUT"
+          else
+            # 每日增量：仅财报季窗口（北京日期 1-4 月 / 7-8 月 / 10 月）执行，窗口外秒退
+            M=$(TZ=Asia/Shanghai date +%-m)
+            if [ "$M" -le 4 ] || [ "$M" -eq 7 ] || [ "$M" -eq 8 ] || [ "$M" -eq 10 ]; then
+              echo "mode=incremental" >> "$GITHUB_OUTPUT"
+              # 业绩快报代理只支持逐股查询，扫描成本高（~36 分钟），只在快报密集窗口
+              #（1-2 月年度快报、7-8 月半年报快报）开启逐股扫描
+              if [ "$M" -le 2 ] || [ "$M" -eq 7 ] || [ "$M" -eq 8 ]; then
+                echo "express_flag=--express-sweep" >> "$GITHUB_OUTPUT"
+              fi
+            else
+              echo "mode=skip" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+      - name: runner 抓财务/指数 -> parquet（全量）
+        if: steps.mode.outputs.mode == 'full'
         env:
           TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
           TUSHARE_API_URL: ${{ secrets.TUSHARE_API_URL }}
@@ -42,10 +67,22 @@ jobs:
           uv run --no-project --with tushare --with pandas --with pyarrow --with numpy \
             python scripts/fetch_fundamentals_parquet.py --outdir artifacts_fund $FLAG
 
+      - name: runner 按公告日增量抓取 -> parquet（财报季每日）
+        if: steps.mode.outputs.mode == 'incremental'
+        env:
+          TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
+          TUSHARE_API_URL: ${{ secrets.TUSHARE_API_URL }}
+        run: |
+          uv run --no-project --with tushare --with pandas --with pyarrow --with numpy \
+            python scripts/fetch_earnings_daily.py --outdir artifacts_fund \
+            --date "$(TZ=Asia/Shanghai date +%F)" ${{ steps.mode.outputs.express_flag }}
+
       - name: 打代码 bundle（服务器免连 GitHub，随 parquet 一起 scp）
+        if: steps.mode.outputs.mode != 'skip'
         run: git bundle create artifacts_fund/repo.bundle main
 
       - name: 传 parquet 到服务器
+        if: steps.mode.outputs.mode != 'skip'
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SERVER_HOST }}
@@ -56,7 +93,8 @@ jobs:
           target: "/tmp/ingest_fund/"
           strip_components: 1
 
-      - name: 服务器入库 + 跑选股 + 清/预热 Redis
+      - name: 服务器入库（增量模式跳过选股/退市清理/Redis 预热）
+        if: steps.mode.outputs.mode != 'skip'
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.SERVER_HOST }}
@@ -72,6 +110,10 @@ jobs:
             # 先把服务器代码更新到与 runner 一致（load/选股逻辑随代码演进，旧代码跑新 parquet 会错位）；
             # bundle 模式：代码来自 scp 来的单文件，服务器不连 GitHub
             bash deploy/update.sh /tmp/ingest_fund/repo.bundle
-            uv run python scripts/load_fundamentals.py /tmp/ingest_fund
-            uv run python deploy/warmup_redis.py || true
+            if [ "${{ steps.mode.outputs.mode }}" = "incremental" ]; then
+              uv run python scripts/load_fundamentals.py /tmp/ingest_fund --incremental
+            else
+              uv run python scripts/load_fundamentals.py /tmp/ingest_fund
+              uv run python deploy/warmup_redis.py || true
+            fi
             rm -rf /tmp/ingest_fund

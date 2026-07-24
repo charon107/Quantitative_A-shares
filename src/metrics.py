@@ -171,6 +171,98 @@ def express_history(code: str, path: str | None = None) -> pd.DataFrame:
     return _per_code_table("stock_express", code, "end_date", path=path)
 
 
+# ========== 财报日历（按公告日 ann_date 聚合三表） ==========
+# 三表 ann_date 均为 'YYYY-MM-DD' 字符串，可直接比较。表不存在时各函数返回空 DataFrame，
+# 路由层据此返回空列表而非 500（与个股财务接口的静默降级一致）。
+
+
+def earnings_calendar_days(month: str | None = None, path: str | None = None) -> pd.DataFrame:
+    """按公告日统计三类披露家数。month='YYYY-MM' 限定月份；None 返回最近 120 天。
+
+    列：date / report_count（正式财报）/ express_count（快报）/ forecast_count（预告）。
+    家数按 distinct code 计（同一公司同日的正式财报与快报各算各的）。
+    month 过滤用参数化 LIKE；None 时用固定 120 天字面窗口（无外部输入）。
+    """
+    # where 只能是下面两个字面量分支之一（外部输入 month 走 ? 参数化）——
+    # 安全约束：往这里拼任何外部输入都会变成 SQL 注入面，勿破例。
+    if month:
+        where = "AND ann_date LIKE ? || '-%'"
+        params: list = [month]
+    else:
+        where = "AND ann_date >= CAST(current_date - INTERVAL 120 DAY AS VARCHAR)"
+        params = []
+    try:
+        df = db.query_df(
+            f"""
+            WITH u AS (
+                SELECT ann_date, code, 'report' AS kind FROM stock_fundamental_quarterly WHERE ann_date IS NOT NULL
+                UNION ALL
+                SELECT ann_date, code, 'express' AS kind FROM stock_express WHERE ann_date IS NOT NULL
+                UNION ALL
+                SELECT ann_date, code, 'forecast' AS kind FROM stock_forecast WHERE ann_date IS NOT NULL
+            )
+            SELECT ann_date AS date,
+                   COUNT(DISTINCT CASE WHEN kind = 'report' THEN code END) AS report_count,
+                   COUNT(DISTINCT CASE WHEN kind = 'express' THEN code END) AS express_count,
+                   COUNT(DISTINCT CASE WHEN kind = 'forecast' THEN code END) AS forecast_count
+            FROM u
+            WHERE 1 = 1 {where}
+            GROUP BY ann_date
+            ORDER BY ann_date DESC
+            """,
+            params,
+            path=path,
+        )
+    except Exception:
+        return pd.DataFrame()
+    for c in ("report_count", "express_count", "forecast_count"):
+        df[c] = df[c].astype(int)
+    return df
+
+
+def earnings_calendar_day(date: str, path: str | None = None) -> dict[str, pd.DataFrame]:
+    """某公告日三表明细（含名称）。键：report / express / forecast；表缺失时对应空帧。"""
+    out: dict[str, pd.DataFrame] = {}
+    queries = {
+        "report": (
+            """
+            SELECT q.code, m.code_name, q.end_date, q.year, q.quarter,
+                   q.q_revenue, q.q_net_profit, q.q_sales_yoy, q.q_netprofit_yoy
+            FROM stock_fundamental_quarterly q
+            LEFT JOIN stock_meta m ON m.code = q.code
+            WHERE q.ann_date = ?
+            ORDER BY q.end_date, q.code
+            """
+        ),
+        "express": (
+            """
+            SELECT e.code, m.code_name, e.end_date,
+                   e.revenue, e.n_income, e.yoy_sales, e.yoy_dedu_np
+            FROM stock_express e
+            LEFT JOIN stock_meta m ON m.code = e.code
+            WHERE e.ann_date = ?
+            ORDER BY e.end_date, e.code
+            """
+        ),
+        "forecast": (
+            """
+            SELECT f.code, m.code_name, f.end_date, f.type,
+                   f.p_change_min, f.p_change_max, f.net_profit_min, f.net_profit_max
+            FROM stock_forecast f
+            LEFT JOIN stock_meta m ON m.code = f.code
+            WHERE f.ann_date = ?
+            ORDER BY f.end_date, f.code
+            """
+        ),
+    }
+    for key, sql in queries.items():
+        try:
+            out[key] = db.query_df(sql, [date], path=path)
+        except Exception:
+            out[key] = pd.DataFrame()
+    return out
+
+
 def hot_stocks(limit: int = 12, path: str | None = None) -> pd.DataFrame:
     """同花顺人气榜（按人气排名升序）。表不存在/无数据返回空 DataFrame。"""
     try:

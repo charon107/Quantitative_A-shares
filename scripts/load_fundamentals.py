@@ -6,7 +6,9 @@ express.parquet，存在才入，展示用与选股解耦）→
 跑 fundamental_screen.run_selection 全量替换 selected_stocks → 清理退市股 →
 原子替换 + 清 Redis 缓存。
 
-用法：uv run python scripts/load_fundamentals.py /tmp/ingest_fund
+用法：uv run python scripts/load_fundamentals.py /tmp/ingest_fund [--incremental]
+--incremental：财报季每日增量模式——只 upsert 五张财务表，跳过逐年选股与退市清理
+（输入是 fetch_earnings_daily.py 按公告日抓的少量股票全历史行，upsert 语义天然安全）。
 """
 from __future__ import annotations
 
@@ -39,12 +41,14 @@ _EXTRA_LOADS = (
 
 
 def main() -> None:
-    d = sys.argv[1] if len(sys.argv) > 1 else "/tmp/ingest_fund"
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    incremental = "--incremental" in sys.argv[1:]
+    d = args[0] if args else "/tmp/ingest_fund"
     fund = _read(d, "fundamental.parquet")
     idx = _read(d, "index.parquet")
     extras = {name: _read(d, name) for name, _fn in _EXTRA_LOADS}
     extra_desc = " ".join(f"{name.split('.')[0]}={len(frame)}" for name, frame in extras.items())
-    print(f"[load_fund] 输入：fundamental={len(fund)} index={len(idx)} {extra_desc}")
+    print(f"[load_fund] 输入：fundamental={len(fund)} index={len(idx)} {extra_desc} incremental={incremental}")
 
     dest = db.DUCKDB_PATH
     _lock = db.acquire_ingest_lock()  # noqa: F841 持有到进程退出，防与每日入库并发丢数据
@@ -71,20 +75,24 @@ def main() -> None:
                 n = getattr(db, fn_name)(frame, conn)
                 print(f"[load_fund] {name.split('.')[0]} {n} 行")
 
-        # 跑选股（用同一写连接读刚 upsert 的 fundamental + 已有 stock_meta，避免重复 open 文件）
-        panel = fundamental_screen.panel_from_conn(conn)
-        nm_df = conn.execute("SELECT code, code_name FROM stock_meta").df()
-        nm = dict(zip(nm_df["code"], nm_df["code_name"])) if not nm_df.empty else {}
-        li_df = conn.execute("SELECT code, list_date, industry FROM stock_info").df()
-        list_dates = dict(zip(li_df["code"], li_df["list_date"])) if not li_df.empty else {}
-        industries = dict(zip(li_df["code"], li_df["industry"])) if not li_df.empty else {}
-        selected = fundamental_screen.select_pool(
-            panel, nm, list_dates=list_dates, industries=industries
-        )
-        n_sel = db.replace_selected_stocks(selected, conn)
+        if incremental:
+            # 增量模式：选股池/退市股只在 5/9/11 月全量刷新时维护，避免日复位抖动
+            print("[load_fund] 增量模式：跳过逐年选股与退市清理")
+        else:
+            # 跑选股（用同一写连接读刚 upsert 的 fundamental + 已有 stock_meta，避免重复 open 文件）
+            panel = fundamental_screen.panel_from_conn(conn)
+            nm_df = conn.execute("SELECT code, code_name FROM stock_meta").df()
+            nm = dict(zip(nm_df["code"], nm_df["code_name"])) if not nm_df.empty else {}
+            li_df = conn.execute("SELECT code, list_date, industry FROM stock_info").df()
+            list_dates = dict(zip(li_df["code"], li_df["list_date"])) if not li_df.empty else {}
+            industries = dict(zip(li_df["code"], li_df["industry"])) if not li_df.empty else {}
+            selected = fundamental_screen.select_pool(
+                panel, nm, list_dates=list_dates, industries=industries
+            )
+            n_sel = db.replace_selected_stocks(selected, conn)
 
-        # 清理退市股（选股池/财务表也一并清）
-        purged = db.purge_delisted(conn)
+            # 清理退市股（选股池/财务表也一并清）
+            purged = db.purge_delisted(conn)
 
     db.atomic_swap(tmp, dest)
     cache.invalidate_all()
