@@ -990,6 +990,25 @@ def fetch_dividend(code: str) -> pd.DataFrame:
     return df[cols].reset_index(drop=True)
 
 
+def _normalize_forecast_frame(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
+    """forecast 响应归一化：日期 ISO、p_change ÷100、net_profit 万元×1e4 转元。
+
+    调用前 df 须已带 code 列（逐股由调用方补、按日由 _from_ts_code_batch 转换）。
+    """
+    if df is None or df.empty:
+        return pd.DataFrame(columns=cols)
+    df = df.copy()
+    df["end_date"] = _ann_date_iso(df["end_date"])
+    df["ann_date"] = _ann_date_iso(df["ann_date"])
+    for c in ("p_change_min", "p_change_max"):
+        df[c] = pd.to_numeric(df.get(c), errors="coerce") / 100.0
+    for c in ("net_profit_min", "net_profit_max"):
+        df[c] = pd.to_numeric(df.get(c), errors="coerce") * 1e4
+    df = df.dropna(subset=["code", "end_date", "ann_date"])
+    df = df.sort_values(["end_date", "ann_date"]).drop_duplicates(["code", "end_date", "ann_date"], keep="last")
+    return df[cols].reset_index(drop=True)
+
+
 def fetch_forecast(code: str) -> pd.DataFrame:
     """单只股票业绩预告历史。同一报告期的多次修正预告全部保留（按公告日区分）。
 
@@ -1009,15 +1028,46 @@ def fetch_forecast(code: str) -> pd.DataFrame:
     if df is None or df.empty:
         return pd.DataFrame(columns=cols)
     df = df.copy()
+    df["code"] = code
+    return _normalize_forecast_frame(df, cols)
+
+
+def fetch_forecast_by_date(ann_date: str) -> pd.DataFrame:
+    """一次请求拿全市场某公告日的业绩预告（输出契约同 fetch_forecast，多 code 混合）。
+
+    ann_date 用 'YYYY-MM-DD'。财报季每日增量抓取用（免逐股调用）。
+    """
+    cols = ["code", "end_date", "ann_date", *FORECAST_COLUMNS]
+    df = _call_with_retry(
+        f"fetch_forecast_by_date({ann_date})",
+        _pro().forecast,
+        ann_date=_to_ts_date(ann_date),
+        fields="ts_code,ann_date,end_date,type,p_change_min,p_change_max,"
+               "net_profit_min,net_profit_max,change_reason",
+    )
+    if df is None or df.empty:
+        return pd.DataFrame(columns=cols)
+    df = _from_ts_code_batch(df)
+    df = df[df["code"].str.match(r"^(sh\.60|sz\.00)\d{4}$", na=False)]
+    return _normalize_forecast_frame(df, cols)
+
+
+def _normalize_express_frame(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
+    """express 响应归一化：日期 ISO、金额数值化、diluted_roe/yoy_* ÷100。
+
+    调用前 df 须已带 code 列（同 _normalize_forecast_frame）。
+    """
+    if df is None or df.empty:
+        return pd.DataFrame(columns=cols)
+    df = df.copy()
     df["end_date"] = _ann_date_iso(df["end_date"])
     df["ann_date"] = _ann_date_iso(df["ann_date"])
-    for c in ("p_change_min", "p_change_max"):
+    for c in ("revenue", "operate_profit", "total_profit", "n_income", "diluted_eps", "bps"):
+        df[c] = pd.to_numeric(df.get(c), errors="coerce")
+    for c in ("diluted_roe", "yoy_sales", "yoy_op", "yoy_dedu_np"):
         df[c] = pd.to_numeric(df.get(c), errors="coerce") / 100.0
-    for c in ("net_profit_min", "net_profit_max"):
-        df[c] = pd.to_numeric(df.get(c), errors="coerce") * 1e4
-    df["code"] = code
-    df = df.dropna(subset=["end_date", "ann_date"])
-    df = df.sort_values(["end_date", "ann_date"]).drop_duplicates(["end_date", "ann_date"], keep="last")
+    df = df.dropna(subset=["code", "end_date"])
+    df = df.sort_values(["end_date", "ann_date"]).drop_duplicates(["code", "end_date"], keep="last")
     return df[cols].reset_index(drop=True)
 
 
@@ -1038,16 +1088,51 @@ def fetch_express(code: str) -> pd.DataFrame:
     if df is None or df.empty:
         return pd.DataFrame(columns=cols)
     df = df.copy()
-    df["end_date"] = _ann_date_iso(df["end_date"])
-    df["ann_date"] = _ann_date_iso(df["ann_date"])
-    for c in ("revenue", "operate_profit", "total_profit", "n_income", "diluted_eps", "bps"):
-        df[c] = pd.to_numeric(df.get(c), errors="coerce")
-    for c in ("diluted_roe", "yoy_sales", "yoy_op", "yoy_dedu_np"):
-        df[c] = pd.to_numeric(df.get(c), errors="coerce") / 100.0
     df["code"] = code
-    df = df.dropna(subset=["end_date"])
-    df = df.sort_values(["end_date", "ann_date"]).drop_duplicates("end_date", keep="last")
-    return df[cols].reset_index(drop=True)
+    return _normalize_express_frame(df, cols)
+
+
+# disclosure_date 分页大小（代理单页上限 6000 行；period 参数被代理忽略，只能全量翻页）
+_DISCLOSURE_PAGE = 6000
+
+
+def fetch_disclosed_report_codes(date: str, tail_days: int = 2) -> list[str]:
+    """实际披露日落在 [date-tail_days, date] 内的主板 code 列表（去重、升序）。
+
+    基于 disclosure_date（财报披露计划表）的 actual_date 实际披露日过滤——本代理
+    不支持 income/fina_indicator 的 ann_date 按日查询（返回空），只能全表分页拉取
+    后客户端过滤。tail_days 回溯几天重抓，吸收"披露日与代理报表数据入库存在 1-2 天
+    时间差"导致的当日抓空（漏抓代价高：次日名单就变了）。
+
+    date 用 'YYYY-MM-DD'。财报季每日增量抓取用。
+    """
+    frames: list[pd.DataFrame] = []
+    offset = 0
+    while True:
+        df = _call_with_retry(
+            f"fetch_disclosure_date(offset={offset})",
+            _pro().disclosure_date,
+            limit=_DISCLOSURE_PAGE,
+            offset=offset,
+            fields="ts_code,end_date,actual_date",
+        )
+        if df is None or df.empty:
+            break
+        frames.append(df)
+        if len(df) < _DISCLOSURE_PAGE:
+            break
+        offset += _DISCLOSURE_PAGE
+    if not frames:
+        return []
+    all_df = pd.concat(frames, ignore_index=True)
+    all_df = _from_ts_code_batch(all_df)
+    actual = pd.to_datetime(all_df["actual_date"], format="%Y%m%d", errors="coerce")
+    target = pd.Timestamp(date)
+    lo = target - pd.Timedelta(days=tail_days)
+    mask = (actual >= lo) & (actual <= target)
+    codes = all_df.loc[mask, "code"].astype(str)
+    mainboard = codes[codes.str.match(r"^(sh\.60|sz\.00)\d{4}$", na=False)]
+    return sorted(mainboard.unique().tolist())
 
 
 def fetch_index_daily(index_code: str = "sh.000001", start_date: str = "", end_date: str = "") -> pd.DataFrame:
