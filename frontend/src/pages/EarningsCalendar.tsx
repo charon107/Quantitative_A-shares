@@ -132,13 +132,18 @@ export function EarningsCalendar({ onOpenStock }: { onOpenStock: (code: string) 
 
   // month 为 null 时后端返回最近 120 天 + 最近披露日，用于初始定位
   const dates = useEarningsCalendarDates(month);
+  // 全局最近披露日缓存：month 查询（如无数据的未来月份）会返回 latest_date=null，
+  // 入口按钮不能依赖当前查询结果，否则翻到无数据月份后按钮消失
+  const [latestDate, setLatestDate] = useState<string | null>(null);
   useEffect(() => {
     const latest = dates.data?.latest_date;
-    if (!month && latest) {
+    if (!latest) return;
+    if (!latestDate || latest > latestDate) setLatestDate(latest);
+    if (!month) {
       setMonth(latest.slice(0, 7));
       setSelected(latest);
     }
-  }, [dates.data, month]);
+  }, [dates.data, month, latestDate]);
 
   const day = useEarningsCalendarDay(selected);
 
@@ -177,13 +182,13 @@ export function EarningsCalendar({ onOpenStock }: { onOpenStock: (code: string) 
           title="财报日历"
           subtitle="按公告日查看全市场财报披露 · 财报季内每日更新"
           right={
-            dates.data?.latest_date && (
+            latestDate && (
               <div ref={pickerRef} className="relative shrink-0">
                 <button
                   onClick={() => setPickerOpen((o) => !o)}
                   className="flex items-center gap-1 rounded-lg border border-line px-2.5 py-1 text-xs text-muted transition hover:border-clay hover:text-clay"
                 >
-                  最近披露日 {dates.data.latest_date}
+                  最近披露日 {latestDate}
                   <svg
                     className={`h-3 w-3 transition-transform ${pickerOpen ? "rotate-180" : ""}`}
                     viewBox="0 0 20 20"
@@ -282,7 +287,7 @@ export function EarningsCalendar({ onOpenStock }: { onOpenStock: (code: string) 
                     </div>
                     <button
                       onClick={() => {
-                        pickDate(dates.data!.latest_date!);
+                        pickDate(latestDate);
                         setPickerOpen(false);
                       }}
                       className="mt-2 w-full rounded-lg py-1 text-[11px] text-muted transition hover:bg-panel2 hover:text-clay"
