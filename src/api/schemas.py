@@ -288,3 +288,61 @@ class Status(BaseModel):
     n_rows: int
     redis_available: bool
     start_date: str
+
+
+# ========== 财报日历 ==========
+class EarningsCalendarDayCount(BaseModel):
+    """某公告日三类披露家数（按 distinct code 计）。"""
+    date: str
+    report_count: int
+    express_count: int
+    forecast_count: int
+
+
+class EarningsCalendarDates(BaseModel):
+    latest_date: str | None  # 最近有披露的日期（无数据为 None）
+    days: list[EarningsCalendarDayCount]
+
+
+class ReportSummary(BaseModel):
+    """正式财报摘要（单季口径，金额为元，同比为小数）。"""
+    end_date: str
+    year: int | None = None
+    quarter: int | None = None
+    q_revenue: float | None = None
+    q_net_profit: float | None = None
+    q_sales_yoy: float | None = None
+    q_netprofit_yoy: float | None = None
+
+
+class ExpressSummary(BaseModel):
+    """业绩快报摘要（金额为元，同比为小数）。"""
+    end_date: str
+    revenue: float | None = None
+    n_income: float | None = None
+    yoy_sales: float | None = None
+    yoy_dedu_np: float | None = None
+
+
+class ForecastSummary(BaseModel):
+    """业绩预告摘要（幅度为小数，金额为元）。"""
+    end_date: str
+    type: str | None = None
+    p_change_min: float | None = None
+    p_change_max: float | None = None
+    net_profit_min: float | None = None
+    net_profit_max: float | None = None
+
+
+class EarningsCalendarRow(BaseModel):
+    """某公告日一只股票的披露聚合（同日多类型合并为一行）。"""
+    code: str
+    code_name: str | None = None
+    report: ReportSummary | None = None
+    express: ExpressSummary | None = None
+    forecast: ForecastSummary | None = None
+
+
+class EarningsCalendarDay(BaseModel):
+    date: str
+    rows: list[EarningsCalendarRow]
