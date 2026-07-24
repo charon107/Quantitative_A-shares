@@ -183,7 +183,14 @@ export function EarningsCalendar({ onOpenStock }: { onOpenStock: (code: string) 
           subtitle="按公告日查看全市场财报披露 · 财报季内每日更新"
           right={
             latestDate && (
-              <div ref={pickerRef} className="relative shrink-0">
+              <div className="flex shrink-0 items-center gap-2">
+                <button
+                  onClick={() => pickDate(latestDate)}
+                  className="rounded-lg px-2 py-1 text-xs text-muted transition hover:text-clay"
+                >
+                  最新披露 {latestDate}
+                </button>
+                <div ref={pickerRef} className="relative">
                 <button
                   onClick={() => setPickerOpen((o) => !o)}
                   className="flex items-center gap-1 rounded-lg border border-line px-2.5 py-1 text-xs text-muted transition hover:border-clay hover:text-clay"
@@ -296,6 +303,7 @@ export function EarningsCalendar({ onOpenStock }: { onOpenStock: (code: string) 
                     </button>
                   </div>
                 )}
+                </div>
               </div>
             )
           }
