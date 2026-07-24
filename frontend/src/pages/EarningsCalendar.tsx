@@ -188,7 +188,7 @@ export function EarningsCalendar({ onOpenStock }: { onOpenStock: (code: string) 
                   onClick={() => setPickerOpen((o) => !o)}
                   className="flex items-center gap-1 rounded-lg border border-line px-2.5 py-1 text-xs text-muted transition hover:border-clay hover:text-clay"
                 >
-                  最近披露日 {latestDate}
+                  {selected ?? latestDate}
                   <svg
                     className={`h-3 w-3 transition-transform ${pickerOpen ? "rotate-180" : ""}`}
                     viewBox="0 0 20 20"
@@ -292,7 +292,7 @@ export function EarningsCalendar({ onOpenStock }: { onOpenStock: (code: string) 
                       }}
                       className="mt-2 w-full rounded-lg py-1 text-[11px] text-muted transition hover:bg-panel2 hover:text-clay"
                     >
-                      回到最近披露日
+                      回到最近披露日 {latestDate}
                     </button>
                   </div>
                 )}
