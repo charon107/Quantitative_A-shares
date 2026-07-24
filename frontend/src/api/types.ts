@@ -283,3 +283,62 @@ export interface ScreeningChart {
   stock: ChartLinePoint[];
   index: ChartLinePoint[];
 }
+
+// ========== 财报日历 ==========
+
+// 某公告日三类披露家数（按 distinct code 计）
+export interface EarningsCalendarDayCount {
+  date: string;
+  report_count: number;
+  express_count: number;
+  forecast_count: number;
+}
+
+export interface EarningsCalendarDates {
+  latest_date: string | null;
+  days: EarningsCalendarDayCount[];
+}
+
+// 正式财报摘要（单季口径，金额为元，同比为小数）
+export interface ReportSummary {
+  end_date: string;
+  year: number | null;
+  quarter: number | null;
+  q_revenue: number | null;
+  q_net_profit: number | null;
+  q_sales_yoy: number | null;
+  q_netprofit_yoy: number | null;
+}
+
+// 业绩快报摘要（金额为元，同比为小数）
+export interface ExpressSummary {
+  end_date: string;
+  revenue: number | null;
+  n_income: number | null;
+  yoy_sales: number | null;
+  yoy_dedu_np: number | null;
+}
+
+// 业绩预告摘要（幅度为小数，金额为元）
+export interface ForecastSummary {
+  end_date: string;
+  type: string | null;
+  p_change_min: number | null;
+  p_change_max: number | null;
+  net_profit_min: number | null;
+  net_profit_max: number | null;
+}
+
+// 某公告日一只股票的披露聚合（同日多类型合并为一行）
+export interface EarningsCalendarRow {
+  code: string;
+  code_name: string | null;
+  report: ReportSummary | null;
+  express: ExpressSummary | null;
+  forecast: ForecastSummary | null;
+}
+
+export interface EarningsCalendarDay {
+  date: string;
+  rows: EarningsCalendarRow[];
+}

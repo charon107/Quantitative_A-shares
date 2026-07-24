@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Overview } from "./pages/Overview";
 import { StockQuery } from "./pages/StockQuery";
 import { Favorites } from "./pages/Favorites";
+import { EarningsCalendar } from "./pages/EarningsCalendar";
 import { Rankings } from "./pages/Rankings";
 import { Screening } from "./pages/Screening";
 import { MaDuration } from "./pages/MaDuration";
@@ -12,6 +13,7 @@ const PAGES = [
   { key: "overview", label: "大盘概览" },
   { key: "stock", label: "个股查询" },
   { key: "favorites", label: "我的收藏" },
+  { key: "earnings", label: "财报日历" },
   { key: "rankings", label: "排行榜" },
   { key: "screening", label: "基本面选股" },
   { key: "maDuration", label: "多头时长" },
@@ -108,6 +110,9 @@ export default function App() {
         )}
         {page === "favorites" && (
           <Favorites onOpenStock={(code) => openStock(code, null, "favorites")} />
+        )}
+        {page === "earnings" && (
+          <EarningsCalendar onOpenStock={(code) => openStock(code, null, "earnings")} />
         )}
         {page === "rankings" && <Rankings onOpenStock={openStock} />}
         {page === "screening" && <Screening onOpenStock={openStock} />}

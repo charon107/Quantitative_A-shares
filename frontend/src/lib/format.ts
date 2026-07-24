@@ -31,3 +31,29 @@ export const signClass = (v: number | null | undefined) =>
 
 export const signArrow = (v: number | null | undefined) =>
   v == null || v === 0 ? "" : v > 0 ? "▲" : "▼";
+
+// 金额（元）-> 亿。财报日历等财务摘要用
+export const fmtYi = (v: number | null | undefined) =>
+  v == null ? "—" : `${(v / 1e8).toFixed(2)} 亿`;
+
+// 小数比率 -> 带符号百分数（0.15 -> "+15.0%"）。库内比率一律为小数
+export const fmtPctDecimal = (v: number | null | undefined, digits = 1) =>
+  v == null ? "—" : `${v >= 0 ? "+" : ""}${(v * 100).toFixed(digits)}%`;
+
+// 小数比率区间（业绩预告变动幅度）：相同则单值，缺一则给单值
+export const fmtPctRange = (lo: number | null | undefined, hi: number | null | undefined) => {
+  if (lo == null && hi == null) return "—";
+  if (lo != null && hi != null) return lo === hi ? fmtPctDecimal(lo) : `${fmtPctDecimal(lo)} ~ ${fmtPctDecimal(hi)}`;
+  return fmtPctDecimal((lo ?? hi) as number);
+};
+
+// 报告期 end_date -> 中文标签（"2026-06-30" -> "2026 半年报"）
+export const fmtPeriodLabel = (endDate: string) => {
+  const y = endDate.slice(0, 4);
+  const mmdd = endDate.slice(5);
+  if (mmdd === "12-31") return `${y} 年报`;
+  if (mmdd === "06-30") return `${y} 半年报`;
+  if (mmdd === "03-31") return `${y} 一季报`;
+  if (mmdd === "09-30") return `${y} 三季报`;
+  return endDate;
+};

@@ -5,6 +5,8 @@ import type {
   CompanyInfo,
   DayMovers,
   DividendRow,
+  EarningsCalendarDates,
+  EarningsCalendarDay,
   EarningsNews,
   HotStock,
   IndexPoint,
@@ -165,6 +167,21 @@ export const useScreeningChart = (year: number | null, code: string | null) =>
 
 export const useMaDuration = () =>
   useQuery({ queryKey: ["maDuration"], queryFn: () => get<MaDuration>("/ma-duration") });
+
+// 财报日历：month 为 null 时后端返回最近 120 天（含最近披露日，供初始定位）
+export const useEarningsCalendarDates = (month: string | null) =>
+  useQuery({
+    queryKey: ["earningsCalendarDates", month ?? "auto"],
+    queryFn: () =>
+      get<EarningsCalendarDates>(`/earnings-calendar/dates${month ? `?month=${encodeURIComponent(month)}` : ""}`),
+  });
+
+export const useEarningsCalendarDay = (date: string | null) =>
+  useQuery({
+    queryKey: ["earningsCalendarDay", date],
+    queryFn: () => get<EarningsCalendarDay>(`/earnings-calendar?date=${encodeURIComponent(date!)}`),
+    enabled: !!date,
+  });
 
 export const useStatus = () =>
   useQuery({ queryKey: ["status"], queryFn: () => get<Status>("/status") });
