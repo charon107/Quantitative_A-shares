@@ -551,6 +551,7 @@ function PositionsCard({
                   <th className="px-3 py-2 text-right font-medium">成本</th>
                   <th className="px-3 py-2 text-right font-medium">现价</th>
                   <th className="px-3 py-2 text-right font-medium">市值</th>
+                  <th className="px-3 py-2 text-right font-medium">净盈利</th>
                   <th className="px-3 py-2 text-right font-medium">盈亏%</th>
                   <th className="px-3 py-2 text-right font-medium">操作</th>
                 </tr>
@@ -565,6 +566,9 @@ function PositionsCard({
                     <td className="px-3 py-2 text-right">{costCell(p)}</td>
                     <td className="px-3 py-2 text-right nums">{fmtPrice(p.last_close)}</td>
                     <td className="px-3 py-2 text-right nums">{fmtMoney(p.market_value)}</td>
+                    <td className={`px-3 py-2 text-right nums ${signClass(p.pnl)}`}>
+                      {p.pnl > 0 ? "+" : ""}{fmtMoney(p.pnl)}
+                    </td>
                     <td className={`px-3 py-2 text-right nums ${signClass(p.pnl_pct)}`}>{fmtPct(p.pnl_pct)}</td>
                     <td className="px-3 py-2 text-right">
                       <button
