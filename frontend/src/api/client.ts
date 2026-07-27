@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   Breadth,
   BreadthPoint,
@@ -11,6 +11,17 @@ import type {
   HotStock,
   IndexPoint,
   MaDuration,
+  PaperAccount,
+  PaperCashFlow,
+  PaperEquityCurve,
+  PaperFill,
+  PaperList,
+  PaperMetrics,
+  PaperOrder,
+  PaperOrderSide,
+  PaperOverview,
+  PaperPosition,
+  PaperPriceType,
   QuarterlyFundamental,
   QuoteRow,
   RankMetric,
@@ -28,6 +39,28 @@ const BASE = "/api";
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`);
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`${res.status} ${path} ${detail}`);
+  }
+  return res.json() as Promise<T>;
+}
+
+async function post<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`${res.status} ${path} ${detail}`);
+  }
+  return res.json() as Promise<T>;
+}
+
+async function del<T>(path: string): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, { method: "DELETE" });
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     throw new Error(`${res.status} ${path} ${detail}`);
@@ -185,3 +218,106 @@ export const useEarningsCalendarDay = (date: string | null) =>
 
 export const useStatus = () =>
   useQuery({ queryKey: ["status"], queryFn: () => get<Status>("/status") });
+
+// ========== 模拟盘（docs/paper-trading-design.md §4） ==========
+// 所有 paper 查询挂在 ["paper", ...] 前缀下，写操作后按前缀整体失效
+
+export const usePaperOverview = (accountId: string | null) =>
+  useQuery({
+    queryKey: ["paper", "overview", accountId],
+    queryFn: () => get<PaperOverview>(`/paper/accounts/${accountId}/overview`),
+    enabled: !!accountId,
+    retry: false, // 404（账户不存在）需立即暴露给页面以清除本地 ID
+  });
+
+export const usePaperPositions = (accountId: string | null) =>
+  useQuery({
+    queryKey: ["paper", "positions", accountId],
+    queryFn: () => get<PaperList<PaperPosition>>(`/paper/accounts/${accountId}/positions`),
+    enabled: !!accountId,
+  });
+
+export const usePaperOrders = (accountId: string | null) =>
+  useQuery({
+    queryKey: ["paper", "orders", accountId],
+    queryFn: () => get<PaperList<PaperOrder>>(`/paper/accounts/${accountId}/orders?limit=200`),
+    enabled: !!accountId,
+  });
+
+export const usePaperFills = (accountId: string | null) =>
+  useQuery({
+    queryKey: ["paper", "fills", accountId],
+    queryFn: () => get<PaperList<PaperFill>>(`/paper/accounts/${accountId}/fills?limit=200`),
+    enabled: !!accountId,
+  });
+
+export const usePaperCashFlows = (accountId: string | null) =>
+  useQuery({
+    queryKey: ["paper", "cashFlows", accountId],
+    queryFn: () => get<PaperList<PaperCashFlow>>(`/paper/accounts/${accountId}/cash-flows?limit=200`),
+    enabled: !!accountId,
+  });
+
+export const usePaperEquityCurve = (accountId: string | null, start?: string) =>
+  useQuery({
+    queryKey: ["paper", "equityCurve", accountId, start ?? "all"],
+    queryFn: () =>
+      get<PaperEquityCurve>(`/paper/accounts/${accountId}/equity-curve${start ? `?start=${start}` : ""}`),
+    enabled: !!accountId,
+  });
+
+export const usePaperMetrics = (accountId: string | null) =>
+  useQuery({
+    queryKey: ["paper", "metrics", accountId],
+    queryFn: () => get<PaperMetrics>(`/paper/accounts/${accountId}/metrics`),
+    enabled: !!accountId,
+  });
+
+const useInvalidatePaper = () => {
+  const qc = useQueryClient();
+  return () => qc.invalidateQueries({ queryKey: ["paper"] });
+};
+
+export const useCreateAccount = () => {
+  const invalidate = useInvalidatePaper();
+  return useMutation({
+    mutationFn: (body: { name: string; init_cash: number }) => post<PaperAccount>("/paper/accounts", body),
+    onSuccess: invalidate,
+  });
+};
+
+export interface PlaceOrderBody {
+  request_id: string;
+  code: string;
+  side: PaperOrderSide;
+  price_type: PaperPriceType;
+  limit_price?: number;
+  qty: number;
+}
+
+export const usePlaceOrder = (accountId: string | null) => {
+  const invalidate = useInvalidatePaper();
+  return useMutation({
+    mutationFn: (body: PlaceOrderBody) =>
+      post<PaperOrder>(`/paper/accounts/${accountId}/orders`, body),
+    onSuccess: invalidate,
+  });
+};
+
+export const useCancelOrder = (accountId: string | null) => {
+  const invalidate = useInvalidatePaper();
+  return useMutation({
+    mutationFn: (orderId: string) =>
+      del<{ ok: boolean }>(`/paper/accounts/${accountId}/orders/${orderId}`),
+    onSuccess: invalidate,
+  });
+};
+
+export const useResetAccount = (accountId: string | null) => {
+  const invalidate = useInvalidatePaper();
+  return useMutation({
+    mutationFn: () =>
+      post<{ ok: boolean; reset_id: string }>(`/paper/accounts/${accountId}/reset`, { confirm: true }),
+    onSuccess: invalidate,
+  });
+};

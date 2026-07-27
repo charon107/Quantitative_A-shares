@@ -25,6 +25,12 @@ export const fmtVolume = (v: number | null | undefined) =>
 export const fmtInt = (v: number | null | undefined) =>
   v == null ? "—" : v.toLocaleString("zh-CN");
 
+// 金额（元）：千分位 + 两位小数。模拟盘资金/市值用
+export const fmtMoney = (v: number | null | undefined) =>
+  v == null
+    ? "—"
+    : v.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
 // 涨跌色：>0 绿（A股 dashboard 沿用绿涨红跌语义），<0 红，=0 中性
 export const signClass = (v: number | null | undefined) =>
   v == null || v === 0 ? "text-muted" : v > 0 ? "text-up" : "text-down";

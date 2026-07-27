@@ -16,7 +16,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from src.api.routes import analytics, earnings_calendar, export, market, rankings, screening, sql, stocks
+from src.api.routes import analytics, earnings_calendar, export, market, paper, rankings, screening, sql, stocks
 
 DIST_DIR = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 
@@ -27,7 +27,7 @@ _origins = os.environ.get("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in _origins if o.strip()],
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["*"],
 )
 
@@ -40,6 +40,7 @@ app.include_router(analytics.router, prefix="/api")
 app.include_router(earnings_calendar.router, prefix="/api")
 app.include_router(export.router, prefix="/api")
 app.include_router(sql.router, prefix="/api")
+app.include_router(paper.router, prefix="/api")
 
 
 @app.get("/api/health")

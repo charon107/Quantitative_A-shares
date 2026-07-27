@@ -63,5 +63,7 @@ jobs:
             # 只影响本命令，API 服务与 warmup 仍用默认值
             DUCKDB_MEMORY_LIMIT=600MB DUCKDB_THREADS=1 \
               uv run python -u scripts/load_all_parquet.py /tmp/ingest
+            # 行情入库完成后撮合模拟盘「待成交」委托（生成净值快照并清缓存），失败不阻塞 warmup
+            uv run python -u scripts/paper_match_daily.py || true
             uv run python -u deploy/warmup_redis.py || true
             rm -rf /tmp/ingest
