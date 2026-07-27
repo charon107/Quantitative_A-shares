@@ -8,6 +8,7 @@ __pycache__/
 *.duckdb
 *.duckdb.new
 *.duckdb.wal
+paper.duckdb
 ingest_state.json
 
 # ===== 数据目录（本地大文件，不入库）=====

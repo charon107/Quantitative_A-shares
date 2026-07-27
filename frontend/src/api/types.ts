@@ -342,3 +342,115 @@ export interface EarningsCalendarDay {
   date: string;
   rows: EarningsCalendarRow[];
 }
+
+// ========== 模拟盘（docs/paper-trading-design.md §4） ==========
+
+export interface PaperAccount {
+  account_id: string;
+  name: string;
+  init_cash: number;
+  cash: number;
+  frozen: number;
+  created_at: string;
+}
+
+export interface PaperOverview {
+  account_id: string;
+  name: string;
+  init_cash: number;
+  cash: number;
+  frozen: number;
+  market_value: number;
+  total_asset: number;
+  total_pnl: number;
+  total_return_pct: number;
+  position_count: number;
+  asof_date: string | null;
+}
+
+export interface PaperPosition {
+  code: string;
+  name: string | null;
+  qty: number;
+  sellable_qty: number;
+  cost_price: number;
+  last_close: number | null;
+  market_value: number;
+  pnl: number;
+  pnl_pct: number;
+}
+
+export type PaperOrderSide = "buy" | "sell";
+export type PaperPriceType = "market" | "limit";
+export type PaperOrderStatus = "pending" | "filled" | "cancelled" | "expired" | "rejected";
+
+export interface PaperOrder {
+  order_id: string;
+  account_id: string;
+  request_id: string;
+  code: string;
+  code_name: string | null;
+  side: PaperOrderSide;
+  price_type: PaperPriceType;
+  limit_price: number | null;
+  qty: number;
+  status: PaperOrderStatus;
+  reject_reason: string | null;
+  ref_price: number | null;
+  frozen_amount: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PaperFill {
+  fill_id: string;
+  order_id: string;
+  account_id: string;
+  code: string;
+  code_name: string | null;
+  side: PaperOrderSide;
+  price: number;
+  qty: number;
+  amount: number;
+  commission: number;
+  stamp_tax: number;
+  fee: number;
+  trade_date: string;
+  created_at: string;
+}
+
+export type PaperCashFlowType = "freeze" | "unfreeze" | "buy" | "sell" | "reset";
+
+export interface PaperCashFlow {
+  flow_id: string;
+  account_id: string;
+  type: PaperCashFlowType;
+  amount: number;
+  balance_after: number;
+  ref_id: string | null;
+  created_at: string;
+}
+
+export interface PaperEquityCurvePoint {
+  date: string;
+  total_asset: number;
+  return_pct: number;
+}
+
+export interface PaperEquityCurve {
+  curve: PaperEquityCurvePoint[];
+  benchmark: IndexPoint[];
+}
+
+// win_rate 为小数比率（0-1），其余 *_pct 为百分数
+export interface PaperMetrics {
+  total_return_pct: number | null;
+  annualized_return_pct: number | null;
+  max_drawdown_pct: number | null;
+  win_rate: number | null;
+}
+
+export interface PaperList<T> {
+  items: T[];
+  total: number;
+}

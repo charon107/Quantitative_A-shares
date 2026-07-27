@@ -6,6 +6,7 @@ import { EarningsCalendar } from "./pages/EarningsCalendar";
 import { Rankings } from "./pages/Rankings";
 import { Screening } from "./pages/Screening";
 import { MaDuration } from "./pages/MaDuration";
+import { PaperTrade } from "./pages/PaperTrade";
 import { Status } from "./pages/Status";
 import { useStatus } from "./api/client";
 
@@ -17,6 +18,7 @@ const PAGES = [
   { key: "rankings", label: "排行榜" },
   { key: "screening", label: "基本面选股" },
   { key: "maDuration", label: "多头时长" },
+  { key: "paper", label: "模拟盘" },
   { key: "status", label: "数据状态" },
 ] as const;
 
@@ -123,6 +125,7 @@ export default function App() {
             onOpenStock={openStockFromMaDuration}
           />
         )}
+        {page === "paper" && <PaperTrade />}
         {page === "status" && <Status />}
       </main>
     </div>
