@@ -43,6 +43,12 @@ const INIT_CASH_PRESETS = [
 
 const MAX_ORDER_QTY = 1_000_000;
 
+// crypto.randomUUID 仅在安全上下文（HTTPS/localhost）可用；站点走 HTTP+IP 访问，需降级
+const genRequestId = (): string =>
+  typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `req-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`;
+
 const SIDE_LABEL: Record<PaperOrderSide, string> = { buy: "买入", sell: "卖出" };
 const PRICE_TYPE_LABEL: Record<PaperPriceType, string> = { market: "市价", limit: "限价" };
 const STATUS_LABEL: Record<PaperOrderStatus, string> = {
@@ -272,7 +278,17 @@ function AccountHeader({
 
   const copyId = async () => {
     try {
-      await navigator.clipboard.writeText(accountId);
+      if (navigator.clipboard) {
+        await navigator.clipboard.writeText(accountId);
+      } else {
+        // HTTP 非安全上下文降级：临时 textarea + execCommand
+        const ta = document.createElement("textarea");
+        ta.value = accountId;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+      }
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
@@ -583,7 +599,7 @@ function OrderPanel({
     if (!canSubmit || !code) return;
     place.mutate(
       {
-        request_id: crypto.randomUUID(),
+        request_id: genRequestId(),
         code,
         side,
         price_type: priceType,
