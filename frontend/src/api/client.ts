@@ -68,6 +68,19 @@ async function del<T>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+async function patch<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`${res.status} ${path} ${detail}`);
+  }
+  return res.json() as Promise<T>;
+}
+
 export const useBreadth = () =>
   useQuery({ queryKey: ["breadth"], queryFn: () => get<Breadth>("/market/breadth") });
 
@@ -309,6 +322,18 @@ export const useCancelOrder = (accountId: string | null) => {
   return useMutation({
     mutationFn: (orderId: string) =>
       del<{ ok: boolean }>(`/paper/accounts/${accountId}/orders/${orderId}`),
+    onSuccess: invalidate,
+  });
+};
+
+export const useUpdateCostPrice = (accountId: string | null) => {
+  const invalidate = useInvalidatePaper();
+  return useMutation({
+    mutationFn: ({ code, cost_price }: { code: string; cost_price: number }) =>
+      patch<{ code: string; cost_price: number }>(
+        `/paper/accounts/${accountId}/positions/${code}`,
+        { cost_price },
+      ),
     onSuccess: invalidate,
   });
 };

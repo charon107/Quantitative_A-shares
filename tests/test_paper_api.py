@@ -93,6 +93,16 @@ def test_list_endpoints(account):
     assert client.get(f"/api/paper/accounts/{account}/cash-flows").status_code == 200
 
 
+def test_update_cost_price_endpoint(account):
+    # 无持仓 → 404；非法成本 → 422（pydantic gt=0）
+    resp = client.patch(f"/api/paper/accounts/{account}/positions/sh.600000",
+                        json={"cost_price": 10.0})
+    assert resp.status_code == 404
+    resp = client.patch(f"/api/paper/accounts/{account}/positions/sh.600000",
+                        json={"cost_price": -1})
+    assert resp.status_code == 422
+
+
 def test_equity_curve_and_metrics(account):
     curve = client.get(f"/api/paper/accounts/{account}/equity-curve")
     assert curve.status_code == 200

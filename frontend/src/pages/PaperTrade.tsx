@@ -13,6 +13,7 @@ import {
   usePlaceOrder,
   useQuotes,
   useResetAccount,
+  useUpdateCostPrice,
 } from "../api/client";
 import type {
   IndexPoint,
@@ -240,6 +241,7 @@ function PaperDashboard({ accountId, onAccountGone }: { accountId: string; onAcc
       <EquityCurveCard accountId={accountId} />
 
       <PositionsCard
+        accountId={accountId}
         positions={positions.data?.items ?? []}
         isLoading={positions.isLoading}
         error={positions.error}
@@ -441,7 +443,7 @@ function EquityChart({
       itemWidth: 24,
       itemHeight: 2,
     },
-    grid: { left: 52, right: 18, top: 30, bottom: 28 },
+    grid: { left: 52, right: 44, top: 30, bottom: 28 },
     tooltip: { trigger: "axis", ...tooltipBase, formatter: tooltipFormatter },
     xAxis: { type: "category", data: dates, boundaryGap: false, ...axisBase },
     yAxis: {
@@ -458,16 +460,75 @@ function EquityChart({
 // ========== 持仓 ==========
 
 function PositionsCard({
+  accountId,
   positions,
   isLoading,
   error,
   onSell,
 }: {
+  accountId: string;
   positions: PaperPosition[];
   isLoading: boolean;
   error: unknown;
   onSell: (code: string) => void;
 }) {
+  const [editing, setEditing] = useState<{ code: string; value: string } | null>(null);
+  const updateCost = useUpdateCostPrice(accountId);
+
+  const saveCost = () => {
+    if (!editing) return;
+    const v = Number(editing.value);
+    if (!Number.isFinite(v) || v <= 0) return;
+    updateCost.mutate(
+      { code: editing.code, cost_price: v },
+      { onSuccess: () => setEditing(null) },
+    );
+  };
+
+  const costCell = (p: PaperPosition) => {
+    if (editing?.code === p.code) {
+      return (
+        <span className="inline-flex items-center justify-end gap-1.5">
+          <input
+            value={editing.value}
+            onChange={(e) => setEditing({ code: p.code, value: e.target.value })}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") saveCost();
+              if (e.key === "Escape") setEditing(null);
+            }}
+            type="number"
+            min={0}
+            step="0.01"
+            autoFocus
+            className="w-20 rounded-md border border-clay bg-panel px-1.5 py-0.5 text-right text-xs nums text-ink outline-none focus:ring-2 focus:ring-clay/20"
+          />
+          <button
+            onClick={saveCost}
+            disabled={updateCost.isPending}
+            className="text-xs font-medium text-clay hover:underline disabled:opacity-40"
+          >
+            确定
+          </button>
+          <button onClick={() => setEditing(null)} className="text-xs text-muted hover:underline">
+            取消
+          </button>
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center justify-end gap-1.5">
+        <span className="nums">{fmtPrice(p.cost_price)}</span>
+        <button
+          onClick={() => setEditing({ code: p.code, value: String(p.cost_price) })}
+          title="修改成本价"
+          className="text-xs text-muted transition hover:text-clay hover:underline"
+        >
+          改
+        </button>
+      </span>
+    );
+  };
+
   return (
     <Card>
       <CardHeader title="持仓" subtitle={`共 ${positions.length} 只`} />
@@ -501,7 +562,7 @@ function PositionsCard({
                     <td className="px-3 py-2 font-medium text-ink">{p.name ?? "—"}</td>
                     <td className="px-3 py-2 text-right nums">{p.qty.toLocaleString("zh-CN")}</td>
                     <td className="px-3 py-2 text-right nums">{p.sellable_qty.toLocaleString("zh-CN")}</td>
-                    <td className="px-3 py-2 text-right nums">{fmtPrice(p.cost_price)}</td>
+                    <td className="px-3 py-2 text-right">{costCell(p)}</td>
                     <td className="px-3 py-2 text-right nums">{fmtPrice(p.last_close)}</td>
                     <td className="px-3 py-2 text-right nums">{fmtMoney(p.market_value)}</td>
                     <td className={`px-3 py-2 text-right nums ${signClass(p.pnl_pct)}`}>{fmtPct(p.pnl_pct)}</td>

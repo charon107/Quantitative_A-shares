@@ -175,6 +175,28 @@ def test_positions_and_records(paper_env):
     assert "freeze" in types and "buy" in types and "unfreeze" in types
 
 
+def test_update_cost_price(paper_env):
+    market_path, paper_path = paper_env
+    aid = make_account()
+    service.place_order(aid, uuid.uuid4().hex, "sz.002594", "buy", "market", None, 1000)
+    backdate_orders(paper_path, DAY1)
+    run_match(market_path, paper_path, DAY1)
+
+    before = service.list_positions(aid)[0]
+    assert before["cost_price"] == pytest.approx(10.005, abs=1e-4)
+    service.update_cost_price(aid, "sz.002594", 9.5)
+    after = service.list_positions(aid)[0]
+    assert after["cost_price"] == 9.5
+    assert after["pnl"] == round((10.0 - 9.5) * 1000, 2)   # 盈亏按新成本重算
+    # 不触动资金
+    assert service.get_overview(aid)["cash"] == 1_000_000.0 - 10005.0
+
+    with pytest.raises(ValueError, match="正数"):
+        service.update_cost_price(aid, "sz.002594", 0)
+    with pytest.raises(LookupError, match="无持仓"):
+        service.update_cost_price(aid, "sh.600000", 10.0)
+
+
 def test_equity_curve_and_metrics(paper_env):
     market_path, paper_path = paper_env
     aid = make_account()

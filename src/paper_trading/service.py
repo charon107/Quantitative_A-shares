@@ -255,6 +255,27 @@ def cancel_order(account_id: str, order_id: str) -> None:
 
 # ---------- 查询 ----------
 
+def update_cost_price(account_id: str, code: str, cost_price: float) -> dict:
+    """手动修改持仓成本价（仅影响盈亏展示口径，不触动资金，故不记资金流水）。"""
+    code = (code or "").strip().lower()
+    if cost_price is None or cost_price <= 0:
+        raise ValueError("成本价必须为正数")
+    with store.connect() as paper_con:
+        _account_row(paper_con, account_id)
+        row = paper_con.execute(
+            "SELECT qty FROM positions WHERE account_id = ? AND code = ?",
+            [account_id, code],
+        ).fetchone()
+        if not row:
+            raise LookupError(f"无持仓：{code}")
+        paper_con.execute(
+            "UPDATE positions SET cost_price = ?, updated_at = current_timestamp"
+            " WHERE account_id = ? AND code = ?",
+            [round(cost_price, 4), account_id, code],
+        )
+    return {"code": code, "cost_price": round(cost_price, 4)}
+
+
 def list_positions(account_id: str) -> list[dict]:
     with store.connect() as paper_con:
         _account_row(paper_con, account_id)

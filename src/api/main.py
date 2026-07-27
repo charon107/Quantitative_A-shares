@@ -27,7 +27,7 @@ _origins = os.environ.get("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in _origins if o.strip()],
-    allow_methods=["GET", "POST", "DELETE"],
+    allow_methods=["GET", "POST", "DELETE", "PATCH"],
     allow_headers=["*"],
 )
 

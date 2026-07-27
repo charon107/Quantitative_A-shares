@@ -32,6 +32,10 @@ class PlaceOrderBody(BaseModel):
     qty: int = Field(..., gt=0)
 
 
+class UpdateCostBody(BaseModel):
+    cost_price: float = Field(..., gt=0)
+
+
 def _handle(fn, *args, **kwargs):
     try:
         return fn(*args, **kwargs)
@@ -62,6 +66,11 @@ def reset(account_id: str, body: ResetBody):
 @router.get("/accounts/{account_id}/positions")
 def positions(account_id: str):
     return {"items": _handle(service.list_positions, account_id)}
+
+
+@router.patch("/accounts/{account_id}/positions/{code}")
+def update_cost(account_id: str, code: str, body: UpdateCostBody):
+    return _handle(service.update_cost_price, account_id, code, body.cost_price)
 
 
 @router.post("/accounts/{account_id}/orders", status_code=201)
