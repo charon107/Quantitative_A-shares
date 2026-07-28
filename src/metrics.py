@@ -547,17 +547,20 @@ def screening_chart(year: int, code: str, ma_n: int = 20, path: str | None = Non
 
 # ========== 数据状态 ==========
 def data_status(path: str | None = None) -> dict:
-    """数据新鲜度与覆盖：最新交易日、覆盖股票数、总行数。"""
+    """数据新鲜度与覆盖：最新/最早交易日、覆盖股票数、总行数。"""
     if not db.database_exists(path):
-        return {"latest_date": None, "n_codes": 0, "n_rows": 0}
+        return {"latest_date": None, "earliest_date": None, "n_codes": 0, "n_rows": 0}
     df = db.query_df(
-        "SELECT MAX(date) AS latest_date, COUNT(DISTINCT code) AS n_codes, COUNT(*) AS n_rows FROM kline",
+        "SELECT MAX(date) AS latest_date, MIN(date) AS earliest_date, "
+        "COUNT(DISTINCT code) AS n_codes, COUNT(*) AS n_rows FROM kline",
         path=path,
     )
     row = df.iloc[0]
     latest = row["latest_date"]
+    earliest = row["earliest_date"]
     return {
         "latest_date": None if pd.isna(latest) else pd.Timestamp(latest).strftime("%Y-%m-%d"),
+        "earliest_date": None if pd.isna(earliest) else pd.Timestamp(earliest).strftime("%Y-%m-%d"),
         "n_codes": int(row["n_codes"]),
         "n_rows": int(row["n_rows"]),
     }

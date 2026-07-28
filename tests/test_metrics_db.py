@@ -102,3 +102,5 @@ def test_data_status(duck):
     assert st["n_codes"] == 3
     assert st["n_rows"] == 120
     assert st["latest_date"] is not None
+    # 统计起始按库内实际最早 K 线日期（合成数据从 2025-01-02 起）
+    assert st["earliest_date"] == "2025-01-02"

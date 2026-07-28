@@ -50,5 +50,6 @@ def status():
         n_codes=st["n_codes"],
         n_rows=st["n_rows"],
         redis_available=cache.is_available(),
-        start_date=services.DEFAULT_START,
+        # 统计起始按库内实际最早 K 线日期；空库时回退到配置常量
+        start_date=st.get("earliest_date") or services.DEFAULT_START,
     )
