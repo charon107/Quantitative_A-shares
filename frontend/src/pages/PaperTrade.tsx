@@ -608,6 +608,9 @@ function OrderPanel({
   const [priceType, setPriceType] = useState<PaperPriceType>("market");
   const [limitPrice, setLimitPrice] = useState("");
   const [qty, setQty] = useState("");
+  // 买入支持按金额：向下取整到整手换算股数（卖出仅按数量）
+  const [qtyMode, setQtyMode] = useState<"qty" | "amount">("qty");
+  const [amount, setAmount] = useState("");
   const place = usePlaceOrder(accountId);
 
   // 持仓行内「卖出」预填
@@ -616,6 +619,7 @@ function OrderPanel({
     setCode(prefill.code);
     setSide(prefill.side);
     if (prefill.side === "sell") {
+      setQtyMode("qty");
       const pos = positions.find((p) => p.code === prefill.code);
       setQty(pos ? String(pos.sellable_qty) : "");
     }
@@ -626,20 +630,43 @@ function OrderPanel({
 
   const position = code ? positions.find((p) => p.code === code) : undefined;
   const qtyNum = Number(qty);
+  const amountNum = Number(amount);
   const refPrice =
     priceType === "limit" ? (limitPrice.trim() ? Number(limitPrice) : null) : (quote?.close ?? null);
 
+  // 买入「按金额」时按参考价向下取整到整手换算股数；其余情况直接用输入数量
+  const byAmount = side === "buy" && qtyMode === "amount";
+  const effectiveQty = byAmount
+    ? refPrice && Number.isFinite(amountNum) && amountNum > 0
+      ? Math.floor(amountNum / refPrice / 100) * 100
+      : 0
+    : qtyNum;
+  // 按金额时换算后未被利用的零头（不冻结）
+  const leftover = byAmount && refPrice && effectiveQty > 0 ? amountNum - effectiveQty * refPrice : 0;
+
   const estimate = useMemo(() => {
-    if (!refPrice || !Number.isFinite(qtyNum) || qtyNum <= 0) return null;
-    const amount = qtyNum * refPrice;
-    const { fee } = estimateFee(amount, side);
-    return { amount, fee, total: side === "buy" ? amount + fee : amount - fee };
-  }, [refPrice, qtyNum, side]);
+    if (!refPrice || !Number.isFinite(effectiveQty) || effectiveQty <= 0) return null;
+    const turnover = effectiveQty * refPrice;
+    const { fee } = estimateFee(turnover, side);
+    return { amount: turnover, fee, total: side === "buy" ? turnover + fee : turnover - fee };
+  }, [refPrice, effectiveQty, side]);
 
   // 前端基础校验（后端仍会复核）
   const errors: string[] = [];
   if (!code) errors.push("请选择股票");
-  if (!qty.trim()) {
+  if (byAmount) {
+    if (!amount.trim()) {
+      errors.push("请输入金额");
+    } else if (!Number.isFinite(amountNum) || amountNum <= 0) {
+      errors.push("金额须为正数");
+    } else if (refPrice) {
+      if (effectiveQty < 100) {
+        errors.push(`金额不足一手（100 股，约需 ${fmtMoney(refPrice * 100)} 元）`);
+      } else if (effectiveQty > MAX_ORDER_QTY) {
+        errors.push("换算数量超过单笔上限 1,000,000 股");
+      }
+    }
+  } else if (!qty.trim()) {
     errors.push("请输入数量");
   } else if (!Number.isInteger(qtyNum) || qtyNum <= 0) {
     errors.push("数量须为正整数");
@@ -669,9 +696,14 @@ function OrderPanel({
         side,
         price_type: priceType,
         ...(priceType === "limit" ? { limit_price: Number(limitPrice) } : {}),
-        qty: qtyNum,
+        qty: effectiveQty,
       },
-      { onSuccess: () => setQty("") },
+      {
+        onSuccess: () => {
+          setQty("");
+          setAmount("");
+        },
+      },
     );
   };
 
@@ -704,7 +736,10 @@ function OrderPanel({
               买入
             </button>
             <button
-              onClick={() => setSide("sell")}
+              onClick={() => {
+                setSide("sell");
+                setQtyMode("qty");
+              }}
               className={toggleCls(side === "sell", "border-down bg-down/10 text-down")}
             >
               卖出
@@ -739,21 +774,58 @@ function OrderPanel({
               />
             </div>
           )}
-          <div className="flex items-center gap-2">
-            <span className="text-[13px] text-muted">数量</span>
-            <input
-              value={qty}
-              onChange={(e) => setQty(e.target.value)}
-              type="number"
-              min={100}
-              step={100}
-              placeholder="100 的整数倍"
-              className="w-36 rounded-lg border border-line bg-panel px-3 py-1.5 text-sm nums text-ink outline-none transition focus:border-clay focus:ring-2 focus:ring-clay/20"
-            />
-            {side === "sell" && position && (
-              <span className="nums text-xs text-muted">可卖 {position.sellable_qty.toLocaleString("zh-CN")}</span>
-            )}
-          </div>
+          {side === "buy" && (
+            <div className="flex items-center gap-2">
+              <span className="text-[13px] text-muted">单位</span>
+              <button
+                onClick={() => setQtyMode("qty")}
+                className={toggleCls(qtyMode === "qty", "border-clay bg-clay/10 text-clay")}
+              >
+                按数量
+              </button>
+              <button
+                onClick={() => setQtyMode("amount")}
+                className={toggleCls(qtyMode === "amount", "border-clay bg-clay/10 text-clay")}
+              >
+                按金额
+              </button>
+            </div>
+          )}
+          {byAmount ? (
+            <div className="flex items-center gap-2">
+              <span className="text-[13px] text-muted">金额</span>
+              <input
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                type="number"
+                min={0}
+                step="100"
+                placeholder="如 5000"
+                className="w-36 rounded-lg border border-line bg-panel px-3 py-1.5 text-sm nums text-ink outline-none transition focus:border-clay focus:ring-2 focus:ring-clay/20"
+              />
+              {effectiveQty > 0 && refPrice != null && (
+                <span className="nums text-xs text-muted">
+                  约合 {effectiveQty.toLocaleString("zh-CN")} 股 ≈ {fmtMoney(effectiveQty * refPrice)} 元
+                </span>
+              )}
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <span className="text-[13px] text-muted">数量</span>
+              <input
+                value={qty}
+                onChange={(e) => setQty(e.target.value)}
+                type="number"
+                min={100}
+                step={100}
+                placeholder="100 的整数倍"
+                className="w-36 rounded-lg border border-line bg-panel px-3 py-1.5 text-sm nums text-ink outline-none transition focus:border-clay focus:ring-2 focus:ring-clay/20"
+              />
+              {side === "sell" && position && (
+                <span className="nums text-xs text-muted">可卖 {position.sellable_qty.toLocaleString("zh-CN")}</span>
+              )}
+            </div>
+          )}
         </div>
 
         {estimate && (
@@ -765,8 +837,14 @@ function OrderPanel({
             </span>{" "}
             <span className="nums font-medium text-ink">{fmtMoney(estimate.total)} 元</span>{" "}
             <span className="nums text-xs text-muted">
-              （成交额 {fmtMoney(estimate.amount)} + 预估费用 {fmtMoney(estimate.fee)}）
+              （{byAmount ? `换算 ${effectiveQty.toLocaleString("zh-CN")} 股，` : ""}成交额 {fmtMoney(estimate.amount)}{" "}
+              {side === "buy" ? "+" : "−"} 预估费用 {fmtMoney(estimate.fee)}）
             </span>
+            {byAmount && leftover > 0 && (
+              <span className="nums block text-xs text-muted">
+                零头 {fmtMoney(leftover)} 元不足一股，不会冻结
+              </span>
+            )}
           </div>
         )}
 
