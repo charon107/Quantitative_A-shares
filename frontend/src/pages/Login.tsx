@@ -61,9 +61,6 @@ export function Login() {
           >
             {busy ? "登录中…" : "登录"}
           </button>
-          <p className="text-xs text-muted">
-            登录由服务器签发 JWT；Access Token 仅存于内存，Refresh Token 走 HttpOnly Cookie。
-          </p>
         </div>
       </Card>
     </div>
