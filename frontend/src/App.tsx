@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Overview } from "./pages/Overview";
 import { StockQuery } from "./pages/StockQuery";
 import { Favorites } from "./pages/Favorites";
@@ -10,7 +10,8 @@ import { PaperTrade } from "./pages/PaperTrade";
 import { Status } from "./pages/Status";
 import { Login } from "./pages/Login";
 import { useStatus } from "./api/client";
-import { logout, useAuthState } from "./api/auth";
+import { logout, tryRestoreSession, useAuthState } from "./api/auth";
+import { Loading } from "./components/States";
 
 const PAGES = [
   { key: "overview", label: "大盘概览" },
@@ -37,8 +38,14 @@ export default function App() {
   const [queryFocus, setQueryFocus] = useState<Focus | null>(null);
   const [queryFrom, setQueryFrom] = useState<PageKey | null>(null);
   const [maDurationPick, setMaDurationPick] = useState<number | null>(null);
+  const [sessionReady, setSessionReady] = useState(false);
   const status = useStatus();
   const loggedIn = useAuthState();
+
+  // 启动时静默尝试恢复会话：HttpOnly Refresh Cookie 换 Access Token（§7.11 + session-cache）
+  useEffect(() => {
+    tryRestoreSession().finally(() => setSessionReady(true));
+  }, []);
 
   // 从排行榜 / 多头时长 / 当日明细点击公司名 -> 跳转个股查询并载入该股
   // focus：可选的 K线聚焦区间；from：可选的来源页（用于返回键）
@@ -136,7 +143,8 @@ export default function App() {
             onOpenStock={openStockFromMaDuration}
           />
         )}
-        {page === "paper" && (loggedIn ? <PaperTrade /> : <Login />)}
+        {page === "paper" && !sessionReady && <Loading label="恢复会话…" />}
+        {page === "paper" && sessionReady && (loggedIn ? <PaperTrade /> : <Login />)}
         {page === "status" && <Status />}
       </main>
     </div>

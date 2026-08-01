@@ -65,7 +65,20 @@ async function refresh(): Promise<boolean> {
   }
   const data = (await res.json()) as TokenPair;
   accessToken = data.access_token;
+  emit(); // ← 修复：通知 useAuthState 订阅者（启动恢复场景从 null 切为有效 token 时关键）
   return true;
+}
+
+/** 应用启动时静默尝试恢复会话：用 HttpOnly Refresh Cookie 换新 Access Token。
+ *  成功 → accessToken 写入内存 + useAuthState 自动更新 → 跳过登录页。
+ *  失败 → 静默返回 false（Cookie 过期/网络不通/未登录过），用户看到登录页。 */
+export async function tryRestoreSession(): Promise<boolean> {
+  if (accessToken) return true;
+  try {
+    return await refresh();
+  } catch {
+    return false;
+  }
 }
 
 /**
