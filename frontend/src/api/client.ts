@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { authedFetch } from "./auth";
 import type {
   Breadth,
   BreadthPoint,
@@ -35,10 +36,10 @@ import type {
   VolatilityPoint,
 } from "./types";
 
-const BASE = "/api";
-
+// 所有请求经 authedFetch：自动附加 Bearer（Access Token 内存态），
+// 401 时尝试刷新一次并重放原请求（规范书 §7.11）。
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`);
+  const res = await authedFetch(path);
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     throw new Error(`${res.status} ${path} ${detail}`);
@@ -47,7 +48,7 @@ async function get<T>(path: string): Promise<T> {
 }
 
 async function post<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await authedFetch(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -60,7 +61,7 @@ async function post<T>(path: string, body: unknown): Promise<T> {
 }
 
 async function del<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, { method: "DELETE" });
+  const res = await authedFetch(path, { method: "DELETE" });
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     throw new Error(`${res.status} ${path} ${detail}`);
@@ -69,7 +70,7 @@ async function del<T>(path: string): Promise<T> {
 }
 
 async function patch<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await authedFetch(path, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -234,6 +235,19 @@ export const useStatus = () =>
 
 // ========== 模拟盘（docs/paper-trading-design.md §4） ==========
 // 所有 paper 查询挂在 ["paper", ...] 前缀下，写操作后按前缀整体失效
+
+export interface PaperAccountItem {
+  account_id: string;
+  name: string;
+  status: string;
+}
+
+/** 当前用户可访问的账户列表（登录态自动拉取，§7.11；不再是 URL 凭证）。 */
+export const usePaperAccounts = () =>
+  useQuery({
+    queryKey: ["paper", "accounts"],
+    queryFn: () => get<{ items: PaperAccountItem[] }>("/paper/accounts"),
+  });
 
 export const usePaperOverview = (accountId: string | null) =>
   useQuery({

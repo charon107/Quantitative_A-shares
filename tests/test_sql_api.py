@@ -29,14 +29,21 @@ def sql_token(monkeypatch):
 
 
 def test_endpoint_hidden_without_token_config(duck, monkeypatch):
-    """未配置 SQL_API_TOKEN 时端点关闭（404），安全默认。"""
+    """legacy 模式未配置 SQL_API_TOKEN 时端点关闭（404），安全默认（§7.8）。
+
+    注意：hybrid/jwt 模式未配置静态 token 时端点仍可走 JWT（见 tests/api/test_sql_auth.py），
+    只有 legacy 回滚基线保持"未配置即关闭"。
+    """
+    from src.auth import config as auth_config
+    monkeypatch.setattr(auth_config, "AUTH_MODE", "legacy")
     monkeypatch.setattr(config, "SQL_API_TOKEN", "")
     assert _post("SELECT 1").status_code == 404
 
 
 def test_wrong_token_rejected(duck, sql_token):
+    """错误 token → 403；无 token（未认证）→ 401（hybrid 可走 JWT，故未配置时也非 404）。"""
     assert _post("SELECT 1", token="bad-token").status_code == 403
-    assert _post("SELECT 1", token=None).status_code == 403
+    assert _post("SELECT 1", token=None).status_code == 401
 
 
 def test_select_returns_arrow(duck, sql_token):

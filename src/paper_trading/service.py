@@ -21,14 +21,14 @@ from src.paper_trading.matcher import _flow, latest_trade_date
 
 def _account_row(paper_con, account_id: str) -> dict:
     row = paper_con.execute(
-        "SELECT account_id, name, init_cash, cash, frozen, created_at, status"
+        "SELECT account_id, name, init_cash, cash, frozen, created_at, status, tenant_id"
         " FROM accounts WHERE account_id = ?",
         [account_id],
     ).fetchone()
     if not row:
         raise LookupError(f"账户不存在：{account_id}")
     return dict(zip(["account_id", "name", "init_cash", "cash", "frozen",
-                     "created_at", "status"], row))
+                     "created_at", "status", "tenant_id"], row))
 
 
 def _order_dict(row) -> dict:
@@ -55,7 +55,15 @@ def _latest_closes(codes: list[str]) -> dict[str, dict]:
 
 # ---------- 账户 ----------
 
-def create_account(name: str, init_cash: float) -> dict:
+def create_account(tenant_id: str, name: str, init_cash: float) -> dict:
+    """创建模拟盘账户（多租户：归属由调用方传入的 tenant_id 决定，§7.6）。
+
+    路由层保证 tenant_id 取自 JWT principal（或 legacy 迁移默认租户），
+    绝不信任客户端传入。账户归属即隔离边界。
+    """
+    tenant_id = (tenant_id or "").strip()
+    if not tenant_id:
+        raise ValueError("租户不能为空")
     name = (name or "").strip()
     if not name:
         raise ValueError("账户名称不能为空")
@@ -64,8 +72,9 @@ def create_account(name: str, init_cash: float) -> dict:
     account_id = uuid.uuid4().hex
     with store.connect() as paper_con:
         paper_con.execute(
-            "INSERT INTO accounts (account_id, name, init_cash, cash) VALUES (?, ?, ?, ?)",
-            [account_id, name, round(init_cash, 2), round(init_cash, 2)],
+            "INSERT INTO accounts (account_id, name, init_cash, cash, tenant_id)"
+            " VALUES (?, ?, ?, ?, ?)",
+            [account_id, name, round(init_cash, 2), round(init_cash, 2), tenant_id],
         )
         td = latest_trade_date()
         if td:

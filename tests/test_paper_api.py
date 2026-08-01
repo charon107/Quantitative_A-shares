@@ -11,7 +11,13 @@ client = TestClient(app)
 
 @pytest.fixture
 def account(tmp_path, monkeypatch, duck):
-    """duck fixture（根 conftest）建好临时行情库后，再指向临时 paper 库并建账户。"""
+    """duck fixture（根 conftest）建好临时行情库后，再指向临时 paper 库并建账户。
+
+    本文件验证 legacy 回滚基线（§9.3）：AUTH_MODE=legacy，account_id 凭证直接访问，
+    账户归 DEFAULT_TENANT_ID。JWT 模式下的越权用例见 tests/api/test_paper_auth.py。
+    """
+    from src.auth import config as auth_config
+    monkeypatch.setattr(auth_config, "AUTH_MODE", "legacy")
     monkeypatch.setenv("PAPER_DUCKDB_PATH", str(tmp_path / "paper.duckdb"))
     resp = client.post("/api/paper/accounts", json={"name": "API测试", "init_cash": 1_000_000})
     assert resp.status_code == 201, resp.text

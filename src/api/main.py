@@ -10,25 +10,37 @@
 from __future__ import annotations
 
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from src.api.routes import analytics, earnings_calendar, export, market, paper, rankings, screening, sql, stocks
+from src.api.routes import analytics, auth, earnings_calendar, export, market, paper, rankings, screening, sql, stocks, tenants
+from src.auth import config as auth_config
 
 DIST_DIR = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 
-app = FastAPI(title="A股股价看板 API", version="2.0.0")
 
-# 开发期允许 Vite dev server 跨域；生产期同源，CORS 无害
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """启动期校验（规范书 §7.12）：AUTH_MODE=jwt 时 JWT_SECRET 必填，缺失拒绝启动。"""
+    auth_config.validate_startup()
+    yield
+
+
+app = FastAPI(title="A股股价看板 API", version="2.0.0", lifespan=lifespan)
+
+# 开发期允许 Vite dev server 跨域；生产期同源，CORS 无害。
+# allow_credentials=True：refresh 走 HttpOnly Cookie（§7.11），跨域时必须允许携带凭证。
 _origins = os.environ.get("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in _origins if o.strip()],
     allow_methods=["GET", "POST", "DELETE", "PATCH"],
     allow_headers=["*"],
+    allow_credentials=True,
 )
 
 # API 路由统一挂在 /api 下
@@ -41,6 +53,8 @@ app.include_router(earnings_calendar.router, prefix="/api")
 app.include_router(export.router, prefix="/api")
 app.include_router(sql.router, prefix="/api")
 app.include_router(paper.router, prefix="/api")
+app.include_router(auth.router, prefix="/api")
+app.include_router(tenants.router, prefix="/api")
 
 
 @app.get("/api/health")

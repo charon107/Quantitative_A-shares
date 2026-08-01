@@ -8,9 +8,28 @@ StartLimitIntervalSec=0
 Type=simple
 User=root
 WorkingDirectory=/root/Quantitative_A-shares/WechatNum
+# 敏感配置（JWT_SECRET / MIGRATE_ADMIN_PASSWORD / SQL_API_TOKEN 等）从服务器本地
+# /etc/wechatnum/secrets.env 注入，绝不落仓库（规范书 §4.2 / §10.1）。
+# 文件缺失时服务仍启动但 JWT_SECRET 为空 → 受保护端点 503（§2.2 原则 4 安全默认关闭），
+# 公开行情不受影响；补齐配置后 systemctl restart api 即恢复。
+EnvironmentFile=-/etc/wechatnum/secrets.env
 Environment="DUCKDB_PATH=/root/Quantitative_A-shares/WechatNum/market.duckdb"
 Environment="REDIS_URL=redis://127.0.0.1:6379/0"
 Environment="DUCKDB_MEMORY_LIMIT=400MB"
+# ===== JWT / 多租户（规范书 §8.1；非敏感项，敏感项在 secrets.env）=====
+Environment="AUTH_MODE=hybrid"
+Environment="JWT_ISSUER=wechatnum-api"
+Environment="JWT_AUDIENCE=wechatnum-clients"
+Environment="JWT_ALGORITHM=HS256"
+Environment="JWT_ACCESS_TTL=900"
+Environment="JWT_REFRESH_TTL=604800"
+Environment="JWT_LEEWAY=30"
+Environment="JWT_COOKIE_NAME=wn_refresh"
+Environment="JWT_COOKIE_SECURE=true"
+Environment="REFRESH_ROTATE=true"
+Environment="PASSWORD_MIN_LEN=8"
+Environment="BCRYPT_ROUNDS=12"
+Environment="DEFAULT_TENANT_ID=t_default"
 ExecStart=/root/.local/bin/uv run uvicorn src.api.main:app --host 0.0.0.0 --port 8501 --workers 1
 Restart=on-failure
 RestartSec=10s

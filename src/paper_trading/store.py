@@ -100,6 +100,45 @@ CREATE TABLE IF NOT EXISTS account_resets (
     snapshot_json VARCHAR NOT NULL,
     created_at    TIMESTAMP NOT NULL DEFAULT current_timestamp
 );
+
+-- ===== 多租户（规范书 §5.2/§5.3）。ALTER + CREATE INDEX 均幂等，兼容既有库文件 =====
+
+-- accounts 追加 tenant_id（NULL = 待迁移回填，由 scripts/migrate_add_tenant.py 处理）
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS tenant_id VARCHAR;
+CREATE INDEX IF NOT EXISTS idx_accounts_tenant ON accounts(tenant_id);
+
+-- 租户表
+CREATE TABLE IF NOT EXISTS tenants (
+    tenant_id   VARCHAR PRIMARY KEY,
+    name        VARCHAR NOT NULL,
+    status      VARCHAR NOT NULL DEFAULT 'active',  -- active / suspended / deleted
+    created_at  TIMESTAMP NOT NULL DEFAULT current_timestamp,
+    updated_at  TIMESTAMP NOT NULL DEFAULT current_timestamp
+);
+
+-- 用户表（登录主体）
+CREATE TABLE IF NOT EXISTS users (
+    user_id       VARCHAR PRIMARY KEY,
+    tenant_id     VARCHAR NOT NULL,
+    username      VARCHAR NOT NULL,          -- 租户内唯一
+    password_hash VARCHAR NOT NULL,          -- passlib bcrypt
+    roles         VARCHAR NOT NULL DEFAULT 'trader',  -- 逗号分隔：admin,trader
+    status        VARCHAR NOT NULL DEFAULT 'active',  -- active / disabled
+    created_at    TIMESTAMP NOT NULL DEFAULT current_timestamp,
+    updated_at    TIMESTAMP NOT NULL DEFAULT current_timestamp,
+    UNIQUE (tenant_id, username)
+);
+CREATE INDEX IF NOT EXISTS idx_users_tenant ON users(tenant_id);
+
+-- 用户 ↔ 账户授权（一个用户可访问租户内若干账户；空表表示按角色默认）
+CREATE TABLE IF NOT EXISTS user_account_grants (
+    user_id    VARCHAR NOT NULL,
+    account_id VARCHAR NOT NULL,
+    granted_at TIMESTAMP NOT NULL DEFAULT current_timestamp,
+    PRIMARY KEY (user_id, account_id)
+);
+CREATE INDEX IF NOT EXISTS idx_grants_user ON user_account_grants(user_id);
+CREATE INDEX IF NOT EXISTS idx_grants_account ON user_account_grants(account_id);
 """
 
 

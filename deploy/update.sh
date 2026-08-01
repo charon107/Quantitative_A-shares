@@ -61,6 +61,21 @@ else
     echo "[$(ts)] 依赖无变更，跳过 uv sync。"
 fi
 
+# 2.5) 多租户数据迁移（幂等：scripts/migrate_add_tenant.py）
+#      admin 已存在时无需 MIGRATE_ADMIN_PASSWORD；首次部署需先在
+#      /etc/wechatnum/secrets.env 配置（见 deploy/README.md）
+if [ -f paper.duckdb ]; then
+    echo "[$(ts)] 执行多租户数据迁移（幂等）..."
+    if [ -f /etc/wechatnum/secrets.env ]; then
+        set -a; . /etc/wechatnum/secrets.env; set +a
+    fi
+    if uv run python scripts/migrate_add_tenant.py; then
+        echo "[$(ts)] 多租户迁移完成。"
+    else
+        echo "[$(ts)] 多租户迁移未完成（首次部署需在 secrets.env 配置 MIGRATE_ADMIN_PASSWORD）"
+    fi
+fi
+
 # 3) 重启 API 服务
 echo "[$(ts)] 重启 api 服务 ..."
 $SYSTEMCTL restart api

@@ -8,7 +8,9 @@ import { Screening } from "./pages/Screening";
 import { MaDuration } from "./pages/MaDuration";
 import { PaperTrade } from "./pages/PaperTrade";
 import { Status } from "./pages/Status";
+import { Login } from "./pages/Login";
 import { useStatus } from "./api/client";
+import { logout, useAuthState } from "./api/auth";
 
 const PAGES = [
   { key: "overview", label: "大盘概览" },
@@ -36,6 +38,7 @@ export default function App() {
   const [queryFrom, setQueryFrom] = useState<PageKey | null>(null);
   const [maDurationPick, setMaDurationPick] = useState<number | null>(null);
   const status = useStatus();
+  const loggedIn = useAuthState();
 
   // 从排行榜 / 多头时长 / 当日明细点击公司名 -> 跳转个股查询并载入该股
   // focus：可选的 K线聚焦区间；from：可选的来源页（用于返回键）
@@ -79,6 +82,14 @@ export default function App() {
             <span className="nums text-xs text-muted">
               数据更新至 {status.data.latest_date} · {status.data.n_codes} 只
             </span>
+          )}
+          {loggedIn && (
+            <button
+              onClick={() => void logout()}
+              className="text-xs font-medium text-muted transition hover:text-clay"
+            >
+              退出登录
+            </button>
           )}
         </div>
         <nav className="mx-auto max-w-6xl px-5">
@@ -125,7 +136,7 @@ export default function App() {
             onOpenStock={openStockFromMaDuration}
           />
         )}
-        {page === "paper" && <PaperTrade />}
+        {page === "paper" && (loggedIn ? <PaperTrade /> : <Login />)}
         {page === "status" && <Status />}
       </main>
     </div>

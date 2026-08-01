@@ -19,7 +19,7 @@ def run_match(market_path, paper_path, trade_date):
 
 
 def make_account(cash=1_000_000.0):
-    return service.create_account("测试账户", cash)["account_id"]
+    return service.create_account("t_default", "测试账户", cash)["account_id"]
 
 
 def place(aid, code, side, qty, price_type="market", limit_price=None):

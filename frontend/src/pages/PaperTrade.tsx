@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import ReactECharts from "echarts-for-react";
 import {
   useCancelOrder,
   useCreateAccount,
+  usePaperAccounts,
   usePaperCashFlows,
   usePaperEquityCurve,
   usePaperFills,
@@ -14,9 +16,11 @@ import {
   useQuotes,
   useResetAccount,
   useUpdateCostPrice,
+  type PaperAccountItem,
 } from "../api/client";
 import type {
   IndexPoint,
+  PaperAccount,
   PaperCashFlowType,
   PaperEquityCurvePoint,
   PaperOrderSide,
@@ -33,7 +37,8 @@ import { fmtMoney, fmtPct, fmtPrice, signClass } from "../lib/format";
 import { useSliceByRange } from "../lib/useSliceByRange";
 import { C, axisBase, baseOption, tooltipBase } from "../theme/echarts";
 
-const STORAGE_KEY = "paper_account_id";
+// 记住上次选中的账户。仅为 UI 偏好，不再是能力凭证——账户访问由服务端按 JWT 校验归属（§7.11）。
+const SELECTED_KEY = "paper_selected_account_id";
 
 const INIT_CASH_PRESETS = [
   { label: "10 万", value: 100_000 },
@@ -88,32 +93,83 @@ function estimateFee(amount: number, side: PaperOrderSide) {
 }
 
 export function PaperTrade() {
-  const [accountId, setAccountId] = useState<string | null>(() => localStorage.getItem(STORAGE_KEY));
+  const qc = useQueryClient();
+  const accounts = usePaperAccounts();
+  const [selectedId, setSelectedId] = useState<string | null>(() => localStorage.getItem(SELECTED_KEY));
 
-  if (!accountId) {
+  const pick = (id: string) => {
+    setSelectedId(id);
+    localStorage.setItem(SELECTED_KEY, id);
+  };
+
+  if (accounts.isLoading) return <Loading label="加载账户…" />;
+  if (accounts.error) return <ErrorState error={accounts.error} />;
+
+  const items = accounts.data?.items ?? [];
+  if (items.length === 0) {
     return (
       <CreateAccountForm
-        onCreated={(id) => {
-          localStorage.setItem(STORAGE_KEY, id);
-          setAccountId(id);
+        onCreated={(acc) => {
+          pick(acc.account_id);
+          // 乐观写入本地缓存：创建后立即进入新账户，避免 refetch 前闪回创建表单
+          qc.setQueryData<{ items: PaperAccountItem[] }>(["paper", "accounts"], (old) => ({
+            items: [...(old?.items ?? []),
+                    { account_id: acc.account_id, name: acc.name, status: "active" }],
+          }));
         }}
       />
     );
   }
+
+  const accountId = items.some((a) => a.account_id === selectedId) ? selectedId! : items[0].account_id;
   return (
-    <PaperDashboard
-      accountId={accountId}
-      onAccountGone={() => {
-        localStorage.removeItem(STORAGE_KEY);
-        setAccountId(null);
-      }}
-    />
+    <div className="space-y-4">
+      <AccountSelector items={items} value={accountId} onChange={pick} />
+      <PaperDashboard
+        accountId={accountId}
+        onAccountGone={() => {
+          localStorage.removeItem(SELECTED_KEY);
+          setSelectedId(null);
+          qc.invalidateQueries({ queryKey: ["paper", "accounts"] });
+        }}
+      />
+    </div>
+  );
+}
+
+// ========== 账户选择 ==========
+
+function AccountSelector({
+  items,
+  value,
+  onChange,
+}: {
+  items: PaperAccountItem[];
+  value: string;
+  onChange: (id: string) => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="text-sm text-muted">账户</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="rounded-xl border border-line bg-panel px-3 py-2 text-sm text-ink shadow-soft outline-none transition focus:border-clay focus:ring-2 focus:ring-clay/20"
+      >
+        {items.map((a) => (
+          <option key={a.account_id} value={a.account_id}>
+            {a.name}
+          </option>
+        ))}
+      </select>
+      <span className="text-xs text-muted">已授权账户列表来自登录态（服务端校验归属）</span>
+    </div>
   );
 }
 
 // ========== 创建账户 ==========
 
-function CreateAccountForm({ onCreated }: { onCreated: (accountId: string) => void }) {
+function CreateAccountForm({ onCreated }: { onCreated: (acc: PaperAccount) => void }) {
   const [name, setName] = useState("");
   const [preset, setPreset] = useState<number | "custom">(1_000_000);
   const [customCash, setCustomCash] = useState("");
@@ -127,7 +183,7 @@ function CreateAccountForm({ onCreated }: { onCreated: (accountId: string) => vo
     create.mutate(
       { name: name.trim(), init_cash: initCash },
       {
-        onSuccess: (acc) => onCreated(acc.account_id),
+        onSuccess: (acc) => onCreated(acc),
       },
     );
   };
@@ -314,7 +370,7 @@ function AccountHeader({
               {copied ? "已复制" : "复制"}
             </button>
           </div>
-          <p className="mt-1 text-xs text-muted">账户仅以此 ID 识别，请复制备份；丢失后无法找回账户。</p>
+          <p className="mt-1 text-xs text-muted">账户归属当前登录账号，访问由服务端校验。</p>
         </div>
         <div className="flex flex-col items-end gap-1">
           <button

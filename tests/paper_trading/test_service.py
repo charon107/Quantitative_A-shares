@@ -11,7 +11,7 @@ from .conftest import DAY1, backdate_orders
 
 
 def make_account(cash=1_000_000.0, name="测试账户"):
-    return service.create_account(name, cash)["account_id"]
+    return service.create_account("t_default", name, cash)["account_id"]
 
 
 def run_match(market_path, paper_path, trade_date):
@@ -23,12 +23,15 @@ def run_match(market_path, paper_path, trade_date):
 # ---------- 账户 ----------
 
 def test_create_account_validation(paper_env):
+    with pytest.raises(ValueError, match="租户"):
+        service.create_account("", "x", 1_000_000)
     with pytest.raises(ValueError, match="名称"):
-        service.create_account("  ", 1_000_000)
+        service.create_account("t_default", "  ", 1_000_000)
     with pytest.raises(ValueError, match="初始资金"):
-        service.create_account("x", 0)
-    acc = service.create_account("x", 500_000)
+        service.create_account("t_default", "x", 0)
+    acc = service.create_account("t_default", "x", 500_000)
     assert acc["cash"] == 500_000.0 and acc["frozen"] == 0.0
+    assert acc["tenant_id"] == "t_default"
 
 
 def test_overview(paper_env):

@@ -24,12 +24,24 @@ DUCKDB_PATH=market.duckdb uv run python scripts/restore_from_backup.py <快照�
 # 2) 传入前端构建产物（本地构建后）
 #    本地：scp -r frontend/dist root@47.109.138.67:/root/Quantitative_A-shares/WechatNum/frontend/
 
-# 3) 安装 systemd 单元
+# 2.5) JWT 密钥 + 管理员初始密码（多租户，规范书 §4.2 / §8.1；绝不落仓库）
+sudo mkdir -p /etc/wechatnum
+echo "JWT_SECRET=$(openssl rand -base64 48 | tr -d '\n')" | sudo tee /etc/wechatnum/secrets.env
+echo "MIGRATE_ADMIN_PASSWORD=<设置一个初始管理员密码>" | sudo tee -a /etc/wechatnum/secrets.env
+# 可选：SQL 网关静态 token
+echo "SQL_API_TOKEN=<随机串>" | sudo tee -a /etc/wechatnum/secrets.env
+sudo chmod 600 /etc/wechatnum/secrets.env
+
+# 3) 多租户数据迁移（建 tenants/users/accounts.tenant_id + 默认管理员 admin）
+set -a; . /etc/wechatnum/secrets.env; set +a
+uv run python scripts/migrate_add_tenant.py
+
+# 4) 安装 systemd 单元
 cp deploy/api.service /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable --now api
 
-# 4) 预热缓存
+# 5) 预热缓存
 uv run python deploy/warmup_redis.py
 ```
 
@@ -51,7 +63,7 @@ uv run python deploy/warmup_redis.py
 ## 日常更新
 
 ```bash
-bash /root/Quantitative_A-shares/WechatNum/deploy/update.sh   # git pull + 按需 uv sync + 重启 api
+bash /root/Quantitative_A-shares/WechatNum/deploy/update.sh   # git pull + 按需 uv sync + 幂等多租户迁移 + 重启 api
 # 前端有改动时，本地重新 npm run build 并 scp dist/ 覆盖
 ```
 
@@ -61,6 +73,10 @@ bash /root/Quantitative_A-shares/WechatNum/deploy/update.sh   # git pull + 按�
 systemctl status api
 journalctl -u api -f
 curl -s http://127.0.0.1:8501/api/status
+# 模拟盘需登录（公开行情无需）：用上面 MIGRATE_ADMIN_PASSWORD 的 admin 账号
+curl -s -X POST http://127.0.0.1:8501/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"<初始密码>"}'
 # 浏览器：http://47.109.138.67:8501
 free -h        # 确认内存正常（DuckDB 查询期 < memory_limit）
 ```
