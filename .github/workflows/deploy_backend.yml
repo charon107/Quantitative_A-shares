@@ -69,8 +69,8 @@ jobs:
             -d '{"sql":"SELECT COUNT(*) AS n FROM stock_fundamental_quarterly"}')
           echo "HTTP $code"; grep -iE "x-rows|x-truncated|content-type" /tmp/headers.txt
           [ "$code" = "200" ]
-          # 无 token 必须被拒（403）
+          # 无 token 必须被拒（JWT 层 401 / SQL 网关层 403，皆视为拒绝）
           denied=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
             "http://${{ secrets.SERVER_HOST }}:8501/api/sql" \
             -H "Content-Type: application/json" -d '{"sql":"SELECT 1"}')
-          echo "无 token: HTTP $denied"; [ "$denied" = "403" ]
+          echo "无 token: HTTP $denied"; [ "$denied" = "401" ] || [ "$denied" = "403" ]
