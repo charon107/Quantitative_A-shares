@@ -1,19 +1,14 @@
-"""A股日线前复权入库（tushare → DuckDB）。
+"""A股日线前复权入库的共享函数库（tushare → DuckDB）。
 
 按交易日批量拉取全市场原始价 + 复权因子，落入 DuckDB 的 raw_kline / adj_factor，
 再按 code 重算前复权（qfq）写入 kline 表，并刷新 stock_meta。
 
-采用「拷贝现有库 → 写临时库 → os.replace 原子替换」，避免与 API 的只读连接争锁。
-
-运行：
-    uv run python -m src.data_collection.stock_price          # 增量入库
-    uv run python -m src.data_collection.stock_price name-map # 仅刷新代码->名称
+本模块不是入口：日常增量入库走「runner 抓 parquet（scripts/fetch_all_parquet.py）
+→ 服务器加载（scripts/load_all_parquet.py）」；全量重建走 scripts/reingest_all.py。
+这里的函数被上述两个脚本与测试复用。
 """
 import os
 import sys
-import json
-from collections import defaultdict
-from datetime import datetime, timedelta
 
 import duckdb
 import pandas as pd
@@ -28,32 +23,10 @@ try:
 except ImportError:  # 直接以脚本路径运行时，兄弟模块在 sys.path[0]
     import tushare_client as tsc
 from src import db
-from src.config import START_DATE  # 拉取起始日期（KLINE_START_DATE 可覆盖）
+from src.config import START_DATE  # noqa: F401  # re-export：scripts/reingest_all.py 从此处导入
 
-# =========================
-# 配置
-# =========================
+# 入库进度状态文件路径（由 scripts/load_all_parquet.py 写入/更新）
 STATE_PATH = os.environ.get("INGEST_STATE_PATH", "ingest_state.json")
-
-# 永久性错误（token失效/权限不足/积分不够）熔断后的冷却时长（小时）
-FATAL_COOLDOWN_HOURS = float(os.environ.get("TUSHARE_FATAL_COOLDOWN_HOURS", "6"))
-
-
-# =========================
-# 状态
-# =========================
-def load_state() -> dict:
-    if os.path.exists(STATE_PATH):
-        with open(STATE_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {"last_run": None}
-
-
-def save_state(state: dict):
-    parent = os.path.dirname(os.path.abspath(STATE_PATH))
-    os.makedirs(parent, exist_ok=True)
-    with open(STATE_PATH, "w", encoding="utf-8") as f:
-        json.dump(state, f, ensure_ascii=False, indent=2)
 
 
 # =========================
@@ -100,45 +73,6 @@ def name_map_frame(stock_df: pd.DataFrame) -> pd.DataFrame:
 
 
 # =========================
-# 交易日
-# =========================
-def next_day(yyyy_mm_dd: str) -> str:
-    d = datetime.strptime(yyyy_mm_dd, "%Y-%m-%d")
-    return (d + timedelta(days=1)).strftime("%Y-%m-%d")
-
-
-def _db_latest_date() -> str | None:
-    """DuckDB 中 kline 的最新日期（迁移后无 state 文件时作为续传基线）。"""
-    if not db.database_exists():
-        return None
-    try:
-        with db.connect(read_only=True) as conn:
-            row = conn.execute("SELECT MAX(date) FROM kline").fetchone()
-        return row[0].strftime("%Y-%m-%d") if row and row[0] else None
-    except Exception:
-        return None
-
-
-def determine_needed_dates(state: dict) -> list[str]:
-    # 优先用 state；缺失时从 DuckDB 现有最新日期续传，避免迁移后从头重拉
-    last_complete = state.get("last_complete_date") or _db_latest_date()
-    start = next_day(last_complete) if last_complete else START_DATE
-    today = datetime.today().strftime("%Y-%m-%d")
-    if start > today:
-        return []
-    dates = tsc.fetch_trade_dates(start, today)
-    return [d.strftime("%Y-%m-%d") for d in dates]
-
-
-def _trip_fatal_breaker(state: dict, error_msg: str):
-    cooldown_until = datetime.now() + timedelta(hours=FATAL_COOLDOWN_HOURS)
-    state["fatal_blocked_until"] = cooldown_until.isoformat()
-    save_state(state)
-    print(f"[Fatal] tushare 永久性错误，立即停止：{error_msg}")
-    print(f"[Fatal] 冷却至 {cooldown_until.isoformat()} 前自动跳过。")
-
-
-# =========================
 # 抓取
 # =========================
 def fetch_market_snapshot(trade_date: str):
@@ -157,24 +91,6 @@ def fetch_market_snapshot(trade_date: str):
         basic[["code", "date", *tsc.VALUATION_METRIC_COLUMNS]] if not basic.empty else pd.DataFrame()
     )
     return raw, factor, valuation
-
-
-def _backfill_new_listing(code: str, raw_rows_by_code: dict, factor_rows_by_code: dict, valuation_rows_by_code: dict):
-    """全新股票：单股全量回补一次。"""
-    raw_hist = tsc.fetch_daily_raw(code, START_DATE, "")
-    factor_hist = tsc.fetch_adj_factor_series(code, START_DATE, "")
-    if not raw_hist.empty:
-        basic_hist = tsc.fetch_daily_basic_series(code, START_DATE, "")
-        if not basic_hist.empty:
-            raw_hist = raw_hist.merge(basic_hist[["date", "turn"]], on="date", how="left")
-            val = basic_hist.drop(columns=["turn"]).assign(code=code)
-            valuation_rows_by_code[code].append(val)
-        else:
-            raw_hist["turn"] = pd.NA
-        raw_hist["code"] = code
-        raw_rows_by_code[code].append(raw_hist)
-    if not factor_hist.empty:
-        factor_rows_by_code[code].append(factor_hist)
 
 
 # =========================
@@ -251,126 +167,3 @@ def persist(stock_df, raw_rows_by_code, factor_rows_by_code, delisted=None, valu
     db.atomic_swap(tmp, dest)
     stats["errors"] = errors
     return stats
-
-
-def build_name_map_only(delisted=None):
-    """仅刷新 stock_meta（不拉 K线），顺带清理退市股。"""
-    stock_df = get_stock_list()
-    conn, tmp, dest = _open_write_copy()
-    purged = 0
-    try:
-        n = db.upsert_meta(name_map_frame(stock_df), conn)
-        purged = db.purge_delisted(conn, delisted)
-    finally:
-        conn.close()
-    db.atomic_swap(tmp, dest)
-    print(f"[name-map] 已刷新 {n} 条代码->名称到 {dest}（清理退市股 {purged} 只）")
-
-
-# =========================
-# 主流程
-# =========================
-def main():
-    state = load_state()
-
-    cooldown_until = state.get("fatal_blocked_until")
-    if cooldown_until and datetime.now() < datetime.fromisoformat(cooldown_until):
-        print(f"[Skip] tushare 冷却期内（至 {cooldown_until}），本次跳过。")
-        return
-
-    try:
-        stock_df = get_stock_list()
-        needed_dates = determine_needed_dates(state)
-    except tsc.TushareFatalError as e:
-        _trip_fatal_breaker(state, str(e))
-        sys.exit(1)
-
-    codes = stock_df["code"].tolist()
-
-    # 退市清单（容错：抓取失败不阻断入库，仅本次跳过清理）
-    try:
-        delisted = set(tsc.fetch_delisted_codes())
-    except Exception as e:
-        print(f"[Warn] 退市清单抓取失败，本次跳过清理：{e}")
-        delisted = set()
-
-    if not needed_dates:
-        print("[Skip] 数据已是最新。仅刷新名称映射。")
-        build_name_map_only(delisted)
-        state["last_run"] = datetime.today().strftime("%Y-%m-%d %H:%M:%S")
-        save_state(state)
-        return
-
-    limit_days = int(os.environ.get("STOCK_DATE_LIMIT", "0"))
-    if limit_days > 0:
-        needed_dates = needed_dates[-limit_days:]
-
-    print(f"需要回补 {len(needed_dates)} 个交易日：{needed_dates[0]} ~ {needed_dates[-1]}")
-
-    raw_rows_by_code: dict[str, list] = defaultdict(list)
-    factor_rows_by_code: dict[str, list] = defaultdict(list)
-    valuation_rows_by_code: dict[str, list] = defaultdict(list)
-    actual_last_date = None
-
-    # 按交易日批量拉全市场
-    try:
-        for d in tqdm(needed_dates, desc="Fetching market snapshots"):
-            raw, factor, valuation = fetch_market_snapshot(d)
-            if raw.empty:
-                print(f"[Warn] {d} 暂无日线（可能未发布），跳过。")
-                continue
-            for code, group in raw.groupby("code"):
-                raw_rows_by_code[code].append(group)
-            if not factor.empty:
-                for code, group in factor.groupby("code"):
-                    factor_rows_by_code[code].append(group)
-            if not valuation.empty:
-                for code, group in valuation.groupby("code"):
-                    valuation_rows_by_code[code].append(group)
-            actual_last_date = d
-    except tsc.TushareFatalError as e:
-        _trip_fatal_breaker(state, str(e))
-        sys.exit(1)
-
-    # 全新股票兜底
-    have = existing_raw_codes()
-    new_codes = [c for c in codes if c not in have and c not in raw_rows_by_code]
-    for code in tqdm(new_codes, desc="Backfilling brand-new listings"):
-        try:
-            _backfill_new_listing(code, raw_rows_by_code, factor_rows_by_code, valuation_rows_by_code)
-        except tsc.TushareFatalError as e:
-            _trip_fatal_breaker(state, str(e))
-            sys.exit(1)
-        except Exception:
-            pass
-
-    stats = persist(stock_df, raw_rows_by_code, factor_rows_by_code, delisted,
-                    valuation_rows_by_code=valuation_rows_by_code)
-
-    if actual_last_date:
-        state["last_complete_date"] = actual_last_date
-    state["last_run"] = datetime.today().strftime("%Y-%m-%d %H:%M:%S")
-    save_state(state)
-
-    print("\n=== DONE ===")
-    print("DuckDB:", os.path.abspath(db.DUCKDB_PATH))
-    print(f"Dates: {len(needed_dates)} ({needed_dates[0]} ~ {needed_dates[-1]})")
-    print(f"Last complete: {actual_last_date or '(无变化)'}")
-    print(f"New listings: {len(new_codes)} | Touched: {len(set(raw_rows_by_code) | set(factor_rows_by_code))}")
-    print("Stats:", {k: v for k, v in stats.items() if k != "errors"})
-    if stats.get("errors"):
-        print("\n--- Errors (up to 30) ---")
-        for code, msg in stats["errors"][:30]:
-            print(code, "=>", msg)
-
-
-if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "name-map":
-        try:
-            _delisted = set(tsc.fetch_delisted_codes())
-        except Exception as e:
-            print(f"[Warn] 退市清单抓取失败，本次跳过清理：{e}")
-            _delisted = set()
-        build_name_map_only(_delisted)
-    else:
-        main()
