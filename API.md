@@ -98,7 +98,7 @@ Python 读回：`pyarrow.ipc.open_stream(resp.content).read_all().to_pandas()`�
 ## 三、数据字典（15 张表）
 
 **全库统一口径**：
-- `code`：股票代码，`sh.600000` / `sz.000001` 风格；覆盖沪深主板（sh.60 / sz.00）
+- `code`：股票代码，`sh.600000` / `sz.000001` 风格；覆盖沪深主板（sh.60 / sz.00），搜索与公司信息（stock_meta/stock_info）同口径，不含创业板/科创板/北交所
 - **比率一律为小数**（0.15 = 15%），例外仅 kline 的 `pctChg`/`turn` 与估值表的 `dv_ratio`/`dv_ttm`（百分数）
 - **金额一律为元**，例外：kline `amount`（千元）、估值表 `total_mv`/`circ_mv`（万元）、公司表 `reg_capital`（万元）
 - 日期：`DATE` 类型列可直接比较；报告期 `end_date`/公告日 `ann_date` 为 `'YYYY-MM-DD'` 字符串

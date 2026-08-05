@@ -3,7 +3,7 @@
 读取 raw_recent / adj_recent / valuation_recent / meta / company / ths_hot，
 upsert raw_kline/adj_factor/stock_valuation_daily → 对「有新交易日」的 code
 重算前复权写 kline → upsert stock_meta / stock_info，全量替换 ths_hot；
-最后原子替换 + 清 Redis 缓存。
+再清理退市股与非主板（创业板/科创板/北交所）存量记录；最后原子替换 + 清 Redis 缓存。
 
 qfq 重算分两档（qfq = raw * factor / 最新factor）：
 - 复权基准（最新复权因子）不变 → 历史 qfq 不变，只为新交易日追加（秒级）；
@@ -44,6 +44,9 @@ FROM f_new n LEFT JOIN f_old o ON n.code = o.code
 """
 
 _PROGRESS_EVERY = 500
+
+# 与 fetch_all_parquet._MB 同口径：沪深主板 sh.60xxxx / sz.00xxxx
+_MB_RE = r"^(sh\.60|sz\.00)\d{4}$"
 
 
 def _read(d: str, name: str) -> pd.DataFrame:
@@ -145,6 +148,17 @@ def main(d: str | None = None) -> None:
         # 清理退市股：runner 给的 list_status='D' + stock_meta 中名字带「退」（退市整理期）
         purged = db.purge_delisted(conn, delisted_codes)
 
+        # 清理非主板股：历史 company/meta 未按主板过滤入库的存量（创业板/科创板/北交所），
+        # 它们有公司信息却永远没有行情，搜索到就是 404
+        dropped = 0
+        for t in ("stock_meta", "stock_info"):
+            n = conn.execute(
+                f"SELECT COUNT(*) FROM {t} WHERE NOT regexp_matches(code, ?)", [_MB_RE]
+            ).fetchone()[0]
+            if n:
+                conn.execute(f"DELETE FROM {t} WHERE NOT regexp_matches(code, ?)", [_MB_RE])
+                dropped += n
+
         nm = conn.execute("SELECT MAX(date) FROM kline").fetchone()[0]
         last_date = nm.strftime("%Y-%m-%d") if nm else None
 
@@ -164,7 +178,7 @@ def main(d: str | None = None) -> None:
 
     # 清 Redis（预热交给 warmup_redis.py）
     cache.invalidate_all()
-    print(f"[load_all] 完成：qfq 全量重算 {n_full} 只 + 增量追加 {n_incr} 只，清理退市股 {purged} 只，最新交易日 {last_date} -> {os.path.abspath(dest)}")
+    print(f"[load_all] 完成：qfq 全量重算 {n_full} 只 + 增量追加 {n_incr} 只，清理退市股 {purged} 只、非主板记录 {dropped} 条，最新交易日 {last_date} -> {os.path.abspath(dest)}")
 
 
 if __name__ == "__main__":

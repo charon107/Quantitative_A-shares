@@ -111,3 +111,26 @@ def test_new_listing_gets_full_compute(env, capsys):
     assert "全量重算 1 只 + 增量追加 0 只" in out
     kl = db.query_df("SELECT close FROM kline WHERE code='sz.301999'")
     assert kl["close"].tolist() == pytest.approx([20.0])
+
+
+def test_non_mainboard_codes_purged_from_meta_info(env, capsys):
+    """非主板（创业板/科创板/北交所）记录：存量清除 + 新输入不落库。"""
+    _seed(env, capsys)
+
+    # 存量：历史 company/meta 未按主板过滤而入库的非主板记录
+    with db.connect(read_only=False) as conn:
+        db.upsert_meta(pd.DataFrame({"code": ["sz.300308"], "code_name": ["中际旭创"]}), conn)
+        db.upsert_company(pd.DataFrame({"code": ["sz.300308"], "code_name": ["中际旭创"]}), conn)
+
+    # 本次入库的 meta/company 仍混入非主板（fetch 侧过滤缺失时的兜底）
+    d = _write_ingest(env / "day2", _raw_df("sh.600000", ["2025-01-09"], [14.0]), _adj_df("sh.600000", ["2025-01-09"], [1.0]))
+    pd.DataFrame({"code": ["sh.600000", "sz.300308"], "code_name": ["浦发银行", "中际旭创"]}).to_parquet(os.path.join(d, "meta.parquet"))
+    pd.DataFrame({"code": ["sh.600000", "sz.300308"], "code_name": ["浦发银行", "中际旭创"]}).to_parquet(os.path.join(d, "company.parquet"))
+    load_all.main(d)
+
+    out = capsys.readouterr().out
+    assert "非主板记录" in out
+    meta_codes = db.query_df("SELECT code FROM stock_meta")["code"].tolist()
+    assert "sh.600000" in meta_codes and "sz.300308" not in meta_codes
+    info_codes = db.query_df("SELECT code FROM stock_info")["code"].tolist()
+    assert "sh.600000" in info_codes and "sz.300308" not in info_codes

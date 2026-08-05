@@ -8,8 +8,8 @@
   adj_recent.parquet        最近 N 个交易日复权因子
   valuation_recent.parquet  最近 N 个交易日估值日频（PE/PB/PS/股息率/市值；
                             与换手率同一 daily_basic 响应，零新增调用量）
-  meta.parquet              代码->名称
-  company.parquet           公司信息（stock_basic + stock_company）
+  meta.parquet              代码->名称（仅沪深主板）
+  company.parquet           公司信息（stock_basic + stock_company，仅沪深主板）
   ths_hot.parquet           同花顺人气榜（最近有数据的交易日）
 
 用法（runner）：
@@ -83,12 +83,13 @@ def main() -> None:
     adj_df.to_parquet(f"{od}/adj_recent.parquet", index=False)
     val_df.to_parquet(f"{od}/valuation_recent.parquet", index=False)
 
-    # 公司信息 + 名称
+    # 公司信息 + 名称（与行情同口径：仅沪深主板，否则会出现"能搜到但无 K线"的半缺失股）
     try:
         comp = tsc.fetch_company_info()
     except Exception as e:
         print(f"[fetch_all] company 失败：{e}")
         comp = pd.DataFrame()
+    comp = _mainboard(comp)
     comp.to_parquet(f"{od}/company.parquet", index=False)
     meta = (
         comp[["code", "code_name"]].dropna(subset=["code"]).drop_duplicates("code")
