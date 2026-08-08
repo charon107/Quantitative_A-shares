@@ -342,7 +342,7 @@ export function EarningsCalendar({ onOpenStock }: { onOpenStock: (code: string) 
                 </div>
               ))}
               {buildMonthCells(month).map((d, i) => {
-                if (d == null) return <div key={`b${i}`} className="min-h-[64px] sm:min-h-[82px]" />;
+                if (d == null) return <div key={`b${i}`} className="min-h-[56px] sm:min-h-[68px]" />;
                 const date = `${month}-${String(d).padStart(2, "0")}`;
                 const count = countByDate.get(date) ?? 0;
                 const isFuture = date > today;
@@ -355,7 +355,7 @@ export function EarningsCalendar({ onOpenStock }: { onOpenStock: (code: string) 
                     onClick={() => pickDate(date)}
                     aria-label={`${date}${count > 0 ? `，${count}条披露` : "，无披露"}`}
                     title={isFuture ? undefined : `${date}${count > 0 ? ` · ${count}条披露` : " · 无披露"}，点击查看`}
-                    className={`group flex min-h-[64px] flex-col items-center justify-center gap-1 rounded-xl border px-1 py-2 transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-clay/50 sm:min-h-[82px] ${
+                    className={`group flex min-h-[56px] flex-col items-center justify-center gap-1 rounded-xl border px-1 py-2 transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-clay/50 sm:min-h-[68px] ${
                       isSelected
                         ? "border-clay bg-clay/10 shadow-soft"
                         : isFuture
@@ -368,7 +368,7 @@ export function EarningsCalendar({ onOpenStock }: { onOpenStock: (code: string) 
                     }`}
                   >
                     <span
-                      className={`nums text-base font-semibold transition-colors sm:text-lg ${
+                      className={`nums text-sm font-semibold transition-colors sm:text-base ${
                         isSelected ? "text-clay" : isFuture ? "" : "text-ink group-hover:text-clay"
                       }`}
                     >
@@ -376,7 +376,7 @@ export function EarningsCalendar({ onOpenStock }: { onOpenStock: (code: string) 
                     </span>
                     {count > 0 ? (
                       <span
-                        className={`nums rounded-full px-2 py-0.5 text-[10px] font-semibold transition-colors sm:text-[11px] ${
+                        className={`nums rounded-full px-1.5 py-0.5 text-[9px] font-semibold transition-colors sm:text-[10px] ${
                           isSelected
                             ? "bg-clay text-white"
                             : "bg-clay/10 text-clay group-hover:bg-clay group-hover:text-white"
