@@ -35,9 +35,10 @@ const fmtYi = (v: unknown) => (typeof v === "number" ? `${v.toFixed(2)} 亿` : "
  * ③ 资产负债折线：总资产 / 总负债 / 总债务（亿元，期末时点值，不随口径切换；
  *    总债务=短借+长借+应付债券，与年度选股 debt_ratio 分子同口径）
  * mode="single" 时 ①② 切换为单季口径（q_ 字段）。
+ * source="express" 的点为前端叠加的最新业绩快报预览，X 轴显式标注“快报”。
  */
 function QuarterlyFundamentalChartImpl({ points, mode, height = 560 }: QuarterlyFundamentalChartProps) {
-  const labels = points.map((p) => `${p.year}Q${p.quarter}`);
+  const labels = points.map((p) => `${p.year}Q${p.quarter}${p.source === "express" ? "·快报" : ""}`);
   const single = mode === "single";
 
   const pct = (v: number | null) => (v == null ? null : v * 100);

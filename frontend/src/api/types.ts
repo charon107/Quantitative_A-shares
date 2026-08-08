@@ -167,6 +167,8 @@ export interface QuarterlyFundamentalPoint {
   year: number;
   quarter: number;
   ann_date: string | null;
+  /** 后端正式财报点无此字段；前端叠加的最新业绩快报预览点标记为 express */
+  source?: "report" | "express";
   roe: number | null;
   roe_dt: number | null;
   roa: number | null;
