@@ -315,53 +315,78 @@ export function EarningsCalendar({ onOpenStock }: { onOpenStock: (code: string) 
             <ErrorState error={dates.error} />
           </div>
         ) : (
-          <div className="px-5 pb-5">
-            <div className="mb-2 flex items-center justify-between">
+          <div className="px-4 pb-5 sm:px-5">
+            <div className="mb-3 flex items-center justify-between">
               <button
                 onClick={() => setMonth(shiftMonth(month, -1))}
-                className="rounded-lg px-2 py-1 text-sm text-muted transition hover:bg-panel2 hover:text-ink"
+                className="flex h-9 w-9 items-center justify-center rounded-full text-xl text-muted transition-all duration-150 hover:-translate-y-0.5 hover:bg-panel2 hover:text-clay hover:shadow-soft active:translate-y-0"
                 aria-label="上个月"
               >
                 ‹
               </button>
-              <span className="nums text-sm font-medium text-ink">{month}</span>
+              <span className="nums rounded-lg bg-panel2/60 px-3 py-1.5 text-base font-semibold tracking-wide text-ink">
+                {month}
+              </span>
               <button
                 onClick={() => setMonth(shiftMonth(month, 1))}
-                className="rounded-lg px-2 py-1 text-sm text-muted transition hover:bg-panel2 hover:text-ink"
+                className="flex h-9 w-9 items-center justify-center rounded-full text-xl text-muted transition-all duration-150 hover:-translate-y-0.5 hover:bg-panel2 hover:text-clay hover:shadow-soft active:translate-y-0"
                 aria-label="下个月"
               >
                 ›
               </button>
             </div>
-            <div className="grid grid-cols-7 gap-1 text-center">
+            <div className="grid grid-cols-7 gap-1.5 text-center sm:gap-2">
               {WEEKDAYS.map((w) => (
-                <div key={w} className="py-1 text-[10px] text-muted">
+                <div key={w} className="py-1.5 text-xs font-medium text-muted">
                   {w}
                 </div>
               ))}
               {buildMonthCells(month).map((d, i) => {
-                if (d == null) return <div key={`b${i}`} />;
+                if (d == null) return <div key={`b${i}`} className="min-h-[64px] sm:min-h-[82px]" />;
                 const date = `${month}-${String(d).padStart(2, "0")}`;
                 const count = countByDate.get(date) ?? 0;
                 const isFuture = date > today;
                 const isSelected = date === selected;
+                const isToday = date === today;
                 return (
                   <button
                     key={date}
                     disabled={isFuture}
                     onClick={() => pickDate(date)}
-                    className={`flex flex-col items-center rounded-lg py-1 transition ${
+                    aria-label={`${date}${count > 0 ? `，${count}条披露` : "，无披露"}`}
+                    title={isFuture ? undefined : `${date}${count > 0 ? ` · ${count}条披露` : " · 无披露"}，点击查看`}
+                    className={`group flex min-h-[64px] flex-col items-center justify-center gap-1 rounded-xl border px-1 py-2 transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-clay/50 sm:min-h-[82px] ${
                       isSelected
-                        ? "bg-clay/10 ring-1 ring-clay"
+                        ? "border-clay bg-clay/10 shadow-soft"
                         : isFuture
-                          ? "text-muted/40"
-                          : "hover:bg-panel2"
+                          ? "cursor-not-allowed border-transparent text-muted/40"
+                          : isToday
+                            ? "border-line bg-panel2/50 hover:-translate-y-0.5 hover:border-clay/40 hover:bg-clay/5 hover:shadow-lift active:translate-y-0"
+                            : count > 0
+                              ? "border-line/70 bg-panel hover:-translate-y-0.5 hover:border-clay/40 hover:bg-clay/5 hover:shadow-lift active:translate-y-0"
+                              : "border-transparent hover:-translate-y-0.5 hover:border-line hover:bg-panel2 hover:shadow-soft active:translate-y-0"
                     }`}
                   >
-                    <span className={`nums text-xs ${isSelected ? "font-semibold text-clay" : "text-ink"}`}>{d}</span>
-                    <span className={`nums text-[9px] leading-tight ${count > 0 ? "text-clay" : "text-transparent"}`}>
-                      {count > 0 ? count : "·"}
+                    <span
+                      className={`nums text-base font-semibold transition-colors sm:text-lg ${
+                        isSelected ? "text-clay" : isFuture ? "" : "text-ink group-hover:text-clay"
+                      }`}
+                    >
+                      {d}
                     </span>
+                    {count > 0 ? (
+                      <span
+                        className={`nums rounded-full px-2 py-0.5 text-[10px] font-semibold transition-colors sm:text-[11px] ${
+                          isSelected
+                            ? "bg-clay text-white"
+                            : "bg-clay/10 text-clay group-hover:bg-clay group-hover:text-white"
+                        }`}
+                      >
+                        {count}条
+                      </span>
+                    ) : (
+                      <span className="h-5" aria-hidden="true" />
+                    )}
                   </button>
                 );
               })}
