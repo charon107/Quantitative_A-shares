@@ -70,3 +70,33 @@ def test_screening_chart(duck_fund):
 def test_screening_chart_missing(duck_fund):
     r = client.get("/api/screening/2025/sz.999999/chart")
     assert r.status_code == 404
+
+
+def test_kline_pub_dates_from_annual_fundamental(duck_fund):
+    """个股查询 K 线接口回传财报公布日（年报+季报并集，升序去重）。"""
+    r = client.get("/api/stocks/sh.600519/kline")
+    assert r.status_code == 200
+    assert r.json()["pub_dates"] == [
+        "2021-04-15", "2022-04-15", "2023-04-15", "2024-04-15", "2025-04-15",
+    ]
+
+
+def test_kline_pub_dates_includes_quarterly(duck_fund):
+    """季报公布日也计入（stock_fundamental_quarterly 的 ann_date）。"""
+    import pandas as pd
+
+    q = pd.DataFrame({
+        "code": "sh.600519",
+        "end_date": ["2024-09-30", "2024-06-30"],
+        "year": [2024, 2024],
+        "quarter": [3, 2],
+        "ann_date": ["2024-10-25", "2024-08-20"],
+    })
+    with db.connect(read_only=False, path=db.DUCKDB_PATH) as conn:
+        db.upsert_fundamental_quarterly(q, conn)
+    r = client.get("/api/stocks/sh.600519/kline")
+    assert r.status_code == 200
+    pub = r.json()["pub_dates"]
+    # 年报日期 + 两份季报日期，升序去重
+    assert "2024-08-20" in pub and "2024-10-25" in pub
+    assert pub == sorted(set(pub))

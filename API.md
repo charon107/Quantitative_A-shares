@@ -251,7 +251,7 @@ SELECT code, MAX(date) AS 最新, COUNT(*) AS 天数 FROM kline GROUP BY code LI
 
 | 端点 | 说明 |
 |---|---|
-| `GET /api/stocks/{code}/kline` | 单股前复权 K线 + MA |
+| `GET /api/stocks/{code}/kline` | 单股前复权 K线 + MA + `pub_dates`（年报/季报公布日，供 K 线叠加虚线） |
 | `GET /api/stocks/{code}/fundamental/quarterly` | 季度基本面（同表 3） |
 | `GET /api/stocks/{code}/valuation` | 估值日频 |
 | `GET /api/stocks/{code}/dividend` | 分红历史 |

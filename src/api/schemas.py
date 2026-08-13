@@ -59,6 +59,8 @@ class StockKline(BaseModel):
     code: str
     code_name: str | None
     points: list[KlinePoint]
+    # 财报公布日（年报+季报，升序去重），供 K 线图叠加虚线
+    pub_dates: list[str] = []
 
 
 class VolatilityPoint(BaseModel):

@@ -166,6 +166,31 @@ def forecast_history(code: str, path: str | None = None) -> pd.DataFrame:
     return _per_code_table("stock_forecast", code, "end_date, ann_date", path=path)
 
 
+def announcement_dates(code: str, path: str | None = None) -> list[str]:
+    """个股全部财报公布日（年报 + 季报，升序去重）。
+
+    数据源：stock_fundamental（年报）与 stock_fundamental_quarterly（季报）
+    的 ann_date；某表缺失/无数据时静默跳过（与个股财务接口降级一致）。
+    供个股查询 K 线图叠加财报公布日竖线（同基本面选股的虚线推广）。
+    """
+    out: list[str] = []
+    for table in ("stock_fundamental", "stock_fundamental_quarterly"):
+        try:
+            df = db.query_df(
+                f"SELECT ann_date FROM {table} WHERE code = ? AND ann_date IS NOT NULL",
+                [code], path=path,
+            )
+        except Exception:
+            continue
+        if df.empty:
+            continue
+        out.extend(
+            d.strftime("%Y-%m-%d")
+            for d in pd.to_datetime(df["ann_date"], errors="coerce").dropna()
+        )
+    return sorted(set(out))
+
+
 def express_history(code: str, path: str | None = None) -> pd.DataFrame:
     """单只股票业绩快报历史（按报告期升序）。"""
     return _per_code_table("stock_express", code, "end_date", path=path)

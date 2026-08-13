@@ -56,6 +56,8 @@ def test_kline_with_ma(duck):
     assert body["code_name"] == "浦发银行"
     assert len(body["points"]) == 40
     assert "MA5" in body["points"][-1]
+    # 无财务数据时财报公布日为空列表
+    assert body["pub_dates"] == []
 
 
 def test_kline_404(duck):

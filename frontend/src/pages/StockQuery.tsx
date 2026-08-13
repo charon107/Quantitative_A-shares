@@ -43,6 +43,7 @@ export function StockQuery({
 
   const pts = kline.data?.points ?? [];
   const last = pts.length ? pts[pts.length - 1] : null;
+  const pubDates = kline.data?.pub_dates ?? [];
 
   const handleRange = useCallback((s: RangeStats | null) => setRangeStats(s), []);
   const toggleRangeMode = () =>
@@ -103,7 +104,7 @@ export function StockQuery({
                 ? "拖动鼠标在 K 线上框选一个区间，查看区间统计"
                 : focus
                 ? `前复权 · 已聚焦 ${focus.start} ~ ${focus.end} 金叉区间`
-                : "前复权 · MA5/10/20/60 · 成交量"
+                : `前复权 · MA5/10/20/60 · 成交量${pubDates.length ? " · 虚线为财报公布日（季报+年报）" : ""}`
             }
             right={
               <div className="flex items-center gap-2">
@@ -129,7 +130,7 @@ export function StockQuery({
           />
           <div className="px-2 pb-2">
             {kline.isLoading ? <Loading /> : kline.error ? <div className="p-4"><ErrorState error={kline.error} /></div> : (
-              <KlineChart points={pts} focus={focus} rangeMode={rangeMode} onRange={handleRange} />
+              <KlineChart points={pts} focus={focus} rangeMode={rangeMode} onRange={handleRange} pubDates={pubDates} />
             )}
           </div>
         </Card>
@@ -147,7 +148,7 @@ export function StockQuery({
       {code && fullscreen && (
         <FullscreenOverlay onClose={() => setFullscreen(false)}>
           <div className="h-full">
-            <KlineChart points={pts} focus={focus} rangeMode={rangeMode} onRange={handleRange} height="100%" />
+            <KlineChart points={pts} focus={focus} rangeMode={rangeMode} onRange={handleRange} height="100%" pubDates={pubDates} />
           </div>
         </FullscreenOverlay>
       )}

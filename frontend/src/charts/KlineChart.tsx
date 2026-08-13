@@ -10,18 +10,27 @@ interface Focus {
   end: string;
 }
 
+/** 返回 >= d 的第一个交易日（财报公布后首个可交易日）；无则 null。 */
+function firstTradingDayOnOrAfter(d: string, dates: string[]): string | null {
+  for (const t of dates) if (t >= d) return t;
+  return null;
+}
+
 function KlineChartImpl({
   points,
   focus,
   rangeMode = false,
   onRange,
   height = 460,
+  pubDates = [],
 }: {
   points: KlinePoint[];
   focus?: Focus | null;
   rangeMode?: boolean;
   onRange?: (stats: RangeStats | null) => void;
   height?: number | string;
+  /** 财报公布日（年报+季报）：在对应交易日画竖向虚线（同基本面选股）。 */
+  pubDates?: string[];
 }) {
   const chartRef = useRef<EChartsType | null>(null);
 
@@ -38,6 +47,15 @@ function KlineChartImpl({
   }, [rangeMode]);
 
   const dates = points.map((p) => p.date);
+  // 财报公布日常落在周末/节假日/停牌，对齐到公布后首个交易日再去重
+  // （ECharts 类目轴 markLine 的 xAxis 必须是精确类目，否则静默丢弃）。
+  const pubMarkLines = Array.from(
+    new Set(
+      pubDates
+        .map((d) => firstTradingDayOnOrAfter(d, dates))
+        .filter((d): d is string => d != null),
+    ),
+  ).map((d) => ({ xAxis: d, lineStyle: { color: C.muted, type: "dashed" as const, width: 1 } }));
   const candles = points.map((p) => [p.open, p.close, p.low, p.high]); // [open, close, low, high]
   const vols = points.map((p) => ({
     value: p.volume == null ? 0 : p.volume / 1e4, // 万手
@@ -179,6 +197,9 @@ function KlineChartImpl({
           borderWidth: 1.2,
         },
         ...(markArea ? { markArea } : {}),
+        ...(pubMarkLines.length
+          ? { markLine: { symbol: "none", silent: true, data: pubMarkLines } }
+          : {}),
       },
       ...maSeries.map((s) => ({ ...s, xAxisIndex: 0, yAxisIndex: 0 })),
       { name: "成交量(万手)", type: "bar", data: vols, xAxisIndex: 1, yAxisIndex: 1 },

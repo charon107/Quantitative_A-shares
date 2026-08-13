@@ -30,7 +30,12 @@ def kline(code: str):
         raise HTTPException(status_code=404, detail=f"无数据：{code}")
     df = metrics.add_moving_averages(df)
     nm = services.name_map()
-    return schemas.StockKline(code=code, code_name=nm.get(code), points=df_to_records(df))
+    return schemas.StockKline(
+        code=code,
+        code_name=nm.get(code),
+        points=df_to_records(df),
+        pub_dates=metrics.announcement_dates(code),
+    )
 
 
 @router.get("/{code}/volatility", response_model=list[schemas.VolatilityPoint])
