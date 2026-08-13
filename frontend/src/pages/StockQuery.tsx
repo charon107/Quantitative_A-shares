@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useKline, useVolatility } from "../api/client";
 import { SearchBox } from "../components/SearchBox";
 import { Card, CardHeader } from "../components/Card";
@@ -23,6 +23,11 @@ interface Focus {
   end: string;
 }
 
+interface FundamentalFocus {
+  dates: string[];
+  requestId: number;
+}
+
 export function StockQuery({
   initialCode,
   focus,
@@ -38,6 +43,9 @@ export function StockQuery({
   const [rangeMode, setRangeMode] = useState(false);
   const [rangeStats, setRangeStats] = useState<RangeStats | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
+  const [fundamentalFocus, setFundamentalFocus] = useState<FundamentalFocus | null>(null);
+  const fundamentalRef = useRef<HTMLDivElement | null>(null);
+  const focusRequestId = useRef(0);
   const kline = useKline(code);
   const vol = useVolatility(code);
 
@@ -46,6 +54,24 @@ export function StockQuery({
   const pubDates = kline.data?.pub_dates ?? [];
 
   const handleRange = useCallback((s: RangeStats | null) => setRangeStats(s), []);
+  const handleDisclosureClick = useCallback((dates: string[]) => {
+    setFullscreen(false);
+    focusRequestId.current += 1;
+    setFundamentalFocus({ dates, requestId: focusRequestId.current });
+  }, []);
+
+  useEffect(() => {
+    if (!fundamentalFocus) return;
+    const frame = window.requestAnimationFrame(() => {
+      const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      fundamentalRef.current?.scrollIntoView({
+        behavior: reduceMotion ? "auto" : "smooth",
+        block: "center",
+      });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [fundamentalFocus]);
+
   const toggleRangeMode = () =>
     setRangeMode((m) => {
       const next = !m;
@@ -104,7 +130,7 @@ export function StockQuery({
                 ? "拖动鼠标在 K 线上框选一个区间，查看区间统计"
                 : focus
                 ? `前复权 · 已聚焦 ${focus.start} ~ ${focus.end} 金叉区间`
-                : `前复权 · MA5/10/20/60 · 成交量${pubDates.length ? " · 虚线为财报公布日（季报+年报）" : ""}`
+                : `前复权 · MA5/10/20/60 · 成交量${pubDates.length ? " · 点击财报公布日虚线定位季度基本面" : ""}`
             }
             right={
               <div className="flex items-center gap-2">
@@ -130,7 +156,14 @@ export function StockQuery({
           />
           <div className="px-2 pb-2">
             {kline.isLoading ? <Loading /> : kline.error ? <div className="p-4"><ErrorState error={kline.error} /></div> : (
-              <KlineChart points={pts} focus={focus} rangeMode={rangeMode} onRange={handleRange} pubDates={pubDates} />
+              <KlineChart
+                points={pts}
+                focus={focus}
+                rangeMode={rangeMode}
+                onRange={handleRange}
+                onDisclosureClick={handleDisclosureClick}
+                pubDates={pubDates}
+              />
             )}
           </div>
         </Card>
@@ -140,7 +173,11 @@ export function StockQuery({
         <RangeStatsPanel stats={rangeStats} onClose={() => setRangeStats(null)} />
       )}
 
-      {code && <FundamentalPanel code={code} />}
+      {code && (
+        <div ref={fundamentalRef}>
+          <FundamentalPanel code={code} focus={fundamentalFocus} />
+        </div>
+      )}
       {code && <ValuationPanel code={code} />}
       {code && <EarningsPanel code={code} />}
       {code && <DividendPanel code={code} />}
@@ -148,7 +185,15 @@ export function StockQuery({
       {code && fullscreen && (
         <FullscreenOverlay onClose={() => setFullscreen(false)}>
           <div className="h-full">
-            <KlineChart points={pts} focus={focus} rangeMode={rangeMode} onRange={handleRange} height="100%" pubDates={pubDates} />
+            <KlineChart
+              points={pts}
+              focus={focus}
+              rangeMode={rangeMode}
+              onRange={handleRange}
+              onDisclosureClick={handleDisclosureClick}
+              height="100%"
+              pubDates={pubDates}
+            />
           </div>
         </FullscreenOverlay>
       )}

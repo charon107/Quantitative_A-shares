@@ -21,6 +21,7 @@ function KlineChartImpl({
   focus,
   rangeMode = false,
   onRange,
+  onDisclosureClick,
   height = 460,
   pubDates = [],
 }: {
@@ -28,6 +29,7 @@ function KlineChartImpl({
   focus?: Focus | null;
   rangeMode?: boolean;
   onRange?: (stats: RangeStats | null) => void;
+  onDisclosureClick?: (dates: string[]) => void;
   height?: number | string;
   /** 财报公布日（年报+季报）：在对应交易日画竖向虚线（同基本面选股）。 */
   pubDates?: string[];
@@ -60,6 +62,8 @@ function KlineChartImpl({
   const pubMarkLines = Array.from(pubDatesByTradingDay, ([tradingDay, disclosures]) => ({
     name: disclosures.join("、"),
     xAxis: tradingDay,
+    tradingDay,
+    disclosureDates: disclosures,
     lineStyle: { color: C.muted, type: "dashed" as const, width: 1 },
   }));
   const candles = points.map((p) => [p.open, p.close, p.low, p.high]); // [open, close, low, high]
@@ -111,12 +115,16 @@ function KlineChartImpl({
   const row = (label: string, val: string, color?: string) =>
     `<div style="display:flex;justify-content:space-between;gap:22px"><span style="color:${C.muted}">${label}</span><b style="color:${color ?? C.ink}">${val}</b></div>`;
 
-  const tooltipFormatter = (params: { dataIndex: number }[]) => {
-    const i = params?.[0]?.dataIndex ?? 0;
+  const formatKlineTooltip = (i: number, disclosures: string[] = [], showClickHint = false) => {
     const p = points[i];
     if (!p) return "";
     const pctStr = p.pctChg == null ? "—" : `${p.pctChg >= 0 ? "+" : ""}${p.pctChg.toFixed(2)}%`;
-    return [
+    const lines = [
+      ...(disclosures.length
+        ? [
+            `<div style="color:${C.up};font-weight:700;margin-bottom:5px">财报披露日：${disclosures.join("、")}</div>`,
+          ]
+        : []),
       `<div style="font-weight:600;margin-bottom:4px">${p.date}</div>`,
       row("涨跌幅", pctStr, sign(p.pctChg)),
       row("开", f2(p.open)),
@@ -130,7 +138,19 @@ function KlineChartImpl({
       row("MA60", f2(p.MA60), MA_COLORS[3]),
       `<div style="border-top:1px solid ${C.line};margin:5px 0"></div>`,
       row("成交量", p.volume == null ? "—" : `${(p.volume / 1e4).toFixed(2)} 万手`),
-    ].join("");
+    ];
+    if (showClickHint) {
+      lines.push(
+        `<div style="border-top:1px solid ${C.line};color:${C.muted};font-size:11px;margin-top:5px;padding-top:5px">点击定位季度基本面</div>`,
+      );
+    }
+    return lines.join("");
+  };
+
+  const tooltipFormatter = (params: { dataIndex: number }[]) => {
+    const i = params?.[0]?.dataIndex ?? 0;
+    const disclosures = pubDatesByTradingDay.get(points[i]?.date ?? "") ?? [];
+    return formatKlineTooltip(i, disclosures);
   };
 
   const option: EChartsOption = baseOption({
@@ -212,7 +232,17 @@ function KlineChartImpl({
                 tooltip: {
                   show: true,
                   trigger: "item",
-                  formatter: (p: { name?: string }) => `财报披露日：${p.name ?? "—"}`,
+                  formatter: (p: {
+                    data?: { disclosureDates?: string[]; tradingDay?: string };
+                  }) => {
+                    const tradingDay = p.data?.tradingDay ?? "";
+                    const dataIndex = dates.indexOf(tradingDay);
+                    return formatKlineTooltip(
+                      dataIndex,
+                      p.data?.disclosureDates ?? [],
+                      true,
+                    );
+                  },
                 },
                 data: pubMarkLines,
               },
@@ -235,6 +265,19 @@ function KlineChartImpl({
     onRange(computeRangeStats(points, Math.round(cr[0]), Math.round(cr[1])));
   };
 
+  const handleClick = (params: {
+    componentType?: string;
+    data?: { disclosureDates?: string[] };
+    name?: string;
+  }) => {
+    if (params.componentType !== "markLine" || !onDisclosureClick) return;
+    const disclosures =
+      params.data?.disclosureDates ??
+      params.name?.split("、").filter(Boolean) ??
+      [];
+    if (disclosures.length) onDisclosureClick(disclosures);
+  };
+
   return (
     <ReactECharts
       option={option}
@@ -247,7 +290,7 @@ function KlineChartImpl({
           inst.dispatchAction({ type: "takeGlobalCursor", key: "brush", brushOption: { brushType: "lineX", brushMode: "single" } });
         }
       }}
-      onEvents={{ brushEnd: handleBrushEnd }}
+      onEvents={{ brushEnd: handleBrushEnd, click: handleClick }}
     />
   );
 }

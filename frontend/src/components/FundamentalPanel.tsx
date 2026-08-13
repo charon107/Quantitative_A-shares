@@ -87,7 +87,13 @@ function withExpressPreview(
   return [...points, preview];
 }
 
-export function FundamentalPanel({ code }: { code: string }) {
+export function FundamentalPanel({
+  code,
+  focus,
+}: {
+  code: string;
+  focus?: { dates: string[]; requestId: number } | null;
+}) {
   const q = useQuarterlyFundamental(code);
   const earnings = useEarnings(code);
   const [mode, setMode] = useState<FundamentalMode>("cum");
@@ -134,7 +140,7 @@ export function FundamentalPanel({ code }: { code: string }) {
         }
       />
       <div className="px-2 pb-2">
-        <QuarterlyFundamentalChart points={points} mode={mode} />
+        <QuarterlyFundamentalChart points={points} mode={mode} focus={focus} />
       </div>
     </Card>
   );

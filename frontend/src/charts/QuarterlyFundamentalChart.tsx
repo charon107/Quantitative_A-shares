@@ -1,6 +1,6 @@
-import { memo } from "react";
+import { memo, useEffect, useRef } from "react";
 import ReactECharts from "echarts-for-react";
-import type { EChartsOption } from "echarts";
+import type { EChartsOption, EChartsType } from "echarts";
 import type { QuarterlyFundamentalPoint } from "../api/types";
 import { C, axisBase, baseOption, tooltipBase } from "../theme/echarts";
 
@@ -9,6 +9,7 @@ export type FundamentalMode = "cum" | "single";
 interface QuarterlyFundamentalChartProps {
   points: QuarterlyFundamentalPoint[];
   mode: FundamentalMode;
+  focus?: { dates: string[]; requestId: number } | null;
   height?: number | string;
 }
 
@@ -41,9 +42,25 @@ const disclosureDate = (p: QuarterlyFundamentalPoint) => p.ann_date ?? "披露�
  * X 轴使用真实披露日 ann_date；tooltip 同时显示所属季度。
  * source="express" 的点为前端叠加的最新业绩快报预览，tooltip 显式标注“快报”。
  */
-function QuarterlyFundamentalChartImpl({ points, mode, height = 560 }: QuarterlyFundamentalChartProps) {
+function QuarterlyFundamentalChartImpl({
+  points,
+  mode,
+  focus,
+  height = 560,
+}: QuarterlyFundamentalChartProps) {
+  const chartRef = useRef<EChartsType | null>(null);
   const labels = points.map(disclosureDate);
   const single = mode === "single";
+  let focusIndex = -1;
+  if (focus) {
+    for (let i = points.length - 1; i >= 0; i -= 1) {
+      const announcementDate = points[i].ann_date;
+      if (announcementDate && focus.dates.includes(announcementDate)) {
+        focusIndex = i;
+        break;
+      }
+    }
+  }
 
   const pct = (v: number | null) => (v == null ? null : v * 100);
   const yi = (v: number | null) => (v == null ? null : v / 1e8);
@@ -58,7 +75,16 @@ function QuarterlyFundamentalChartImpl({ points, mode, height = 560 }: Quarterly
   const totalLiab = points.map((p) => yi(p.total_liab));
   const totalDebt = points.map((p) => yi(p.total_debt));
 
-  const zoomStart = Math.max(0, ((labels.length - DEFAULT_QUARTERS) / Math.max(labels.length, 1)) * 100);
+  const visibleCount = Math.min(DEFAULT_QUARTERS, labels.length);
+  const maxStartIndex = Math.max(0, labels.length - visibleCount);
+  const startIndex =
+    focusIndex >= 0
+      ? Math.max(0, Math.min(focusIndex - Math.floor(visibleCount * 0.65), maxStartIndex))
+      : maxStartIndex;
+  const endIndex = Math.min(labels.length - 1, startIndex + visibleCount - 1);
+  const zoomDenominator = Math.max(labels.length - 1, 1);
+  const zoomStart = (startIndex / zoomDenominator) * 100;
+  const zoomEnd = labels.length ? (endIndex / zoomDenominator) * 100 : 100;
 
   const xAxis = (gridIndex: number, showLabel: boolean) => ({
     type: "category" as const,
@@ -134,12 +160,12 @@ function QuarterlyFundamentalChartImpl({ points, mode, height = 560 }: Quarterly
       { scale: true, gridIndex: 2, position: "right", name: "亿元", ...axisBase },
     ],
     dataZoom: [
-      { type: "inside", xAxisIndex: [0, 1, 2], start: zoomStart, end: 100 },
+      { type: "inside", xAxisIndex: [0, 1, 2], start: zoomStart, end: zoomEnd },
       {
         type: "slider",
         xAxisIndex: [0, 1, 2],
         start: zoomStart,
-        end: 100,
+        end: zoomEnd,
         bottom: 4,
         height: 16,
         borderColor: C.line,
@@ -161,7 +187,57 @@ function QuarterlyFundamentalChartImpl({ points, mode, height = 560 }: Quarterly
     ],
   });
 
-  return <ReactECharts option={option} style={{ height }} notMerge lazyUpdate />;
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart || !focus || focusIndex < 0) return;
+
+    const timers: number[] = [];
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const seriesBatch = Array.from({ length: 9 }, (_, seriesIndex) => ({
+      seriesIndex,
+      dataIndex: focusIndex,
+    }));
+
+    const highlight = () => {
+      chart.dispatchAction({ type: "highlight", batch: seriesBatch });
+      chart.dispatchAction({ type: "showTip", seriesIndex: 0, dataIndex: focusIndex });
+    };
+    const clearHighlight = () => {
+      chart.dispatchAction({ type: "downplay", batch: seriesBatch });
+      chart.dispatchAction({ type: "hideTip" });
+    };
+
+    chart.dispatchAction({ type: "dataZoom", dataZoomIndex: 0, start: zoomStart, end: zoomEnd });
+    chart.dispatchAction({ type: "dataZoom", dataZoomIndex: 1, start: zoomStart, end: zoomEnd });
+
+    if (reducedMotion) {
+      timers.push(window.setTimeout(highlight, 80));
+      timers.push(window.setTimeout(clearHighlight, 700));
+    } else {
+      // 等页面平滑滚动到季度图后再闪两次，效果与鼠标悬停同源。
+      timers.push(window.setTimeout(highlight, 700));
+      timers.push(window.setTimeout(clearHighlight, 1050));
+      timers.push(window.setTimeout(highlight, 1250));
+      timers.push(window.setTimeout(clearHighlight, 1600));
+    }
+
+    return () => {
+      timers.forEach(window.clearTimeout);
+      clearHighlight();
+    };
+  }, [focus?.requestId, focusIndex, zoomEnd, zoomStart]);
+
+  return (
+    <ReactECharts
+      option={option}
+      style={{ height }}
+      notMerge
+      lazyUpdate
+      onChartReady={(chart: EChartsType) => {
+        chartRef.current = chart;
+      }}
+    />
+  );
 }
 
 export const QuarterlyFundamentalChart = memo(QuarterlyFundamentalChartImpl);
