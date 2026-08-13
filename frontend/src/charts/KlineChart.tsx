@@ -49,13 +49,19 @@ function KlineChartImpl({
   const dates = points.map((p) => p.date);
   // 财报公布日常落在周末/节假日/停牌，对齐到公布后首个交易日再去重
   // （ECharts 类目轴 markLine 的 xAxis 必须是精确类目，否则静默丢弃）。
-  const pubMarkLines = Array.from(
-    new Set(
-      pubDates
-        .map((d) => firstTradingDayOnOrAfter(d, dates))
-        .filter((d): d is string => d != null),
-    ),
-  ).map((d) => ({ xAxis: d, lineStyle: { color: C.muted, type: "dashed" as const, width: 1 } }));
+  const pubDatesByTradingDay = new Map<string, string[]>();
+  for (const disclosureDate of pubDates) {
+    const tradingDay = firstTradingDayOnOrAfter(disclosureDate, dates);
+    if (!tradingDay) continue;
+    const disclosures = pubDatesByTradingDay.get(tradingDay) ?? [];
+    if (!disclosures.includes(disclosureDate)) disclosures.push(disclosureDate);
+    pubDatesByTradingDay.set(tradingDay, disclosures);
+  }
+  const pubMarkLines = Array.from(pubDatesByTradingDay, ([tradingDay, disclosures]) => ({
+    name: disclosures.join("、"),
+    xAxis: tradingDay,
+    lineStyle: { color: C.muted, type: "dashed" as const, width: 1 },
+  }));
   const candles = points.map((p) => [p.open, p.close, p.low, p.high]); // [open, close, low, high]
   const vols = points.map((p) => ({
     value: p.volume == null ? 0 : p.volume / 1e4, // 万手
@@ -198,7 +204,19 @@ function KlineChartImpl({
         },
         ...(markArea ? { markArea } : {}),
         ...(pubMarkLines.length
-          ? { markLine: { symbol: "none", silent: true, data: pubMarkLines } }
+          ? {
+              markLine: {
+                symbol: "none",
+                silent: false,
+                label: { show: false },
+                tooltip: {
+                  show: true,
+                  trigger: "item",
+                  formatter: (p: { name?: string }) => `财报披露日：${p.name ?? "—"}`,
+                },
+                data: pubMarkLines,
+              },
+            }
           : {}),
       },
       ...maSeries.map((s) => ({ ...s, xAxisIndex: 0, yAxisIndex: 0 })),

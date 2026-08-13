@@ -19,14 +19,17 @@ const DEFAULT_QUARTERS = 20;
 const RATIO_SERIES = new Set(["ROE", "净利率", "毛利率"]);
 
 interface TooltipParam {
+  dataIndex?: number;
   marker?: string;
   seriesName?: string;
   value?: unknown;
-  axisValueLabel?: string;
 }
 
 const fmtRatio = (v: unknown) => (typeof v === "number" ? `${v.toFixed(2)}%` : "—");
 const fmtYi = (v: unknown) => (typeof v === "number" ? `${v.toFixed(2)} 亿` : "—");
+const reportPeriod = (p: QuarterlyFundamentalPoint) =>
+  `${p.year}Q${p.quarter}${p.source === "express" ? "·快报" : ""}`;
+const disclosureDate = (p: QuarterlyFundamentalPoint) => p.ann_date ?? "披露日未知";
 
 /**
  * 季度基本面三联图（共享 X 轴 + 联动 axisPointer + dataZoom）：
@@ -35,10 +38,11 @@ const fmtYi = (v: unknown) => (typeof v === "number" ? `${v.toFixed(2)} 亿` : "
  * ③ 资产负债折线：总资产 / 总负债 / 总债务（亿元，期末时点值，不随口径切换；
  *    总债务=短借+长借+应付债券，与年度选股 debt_ratio 分子同口径）
  * mode="single" 时 ①② 切换为单季口径（q_ 字段）。
- * source="express" 的点为前端叠加的最新业绩快报预览，X 轴显式标注“快报”。
+ * X 轴使用真实披露日 ann_date；tooltip 同时显示所属季度。
+ * source="express" 的点为前端叠加的最新业绩快报预览，tooltip 显式标注“快报”。
  */
 function QuarterlyFundamentalChartImpl({ points, mode, height = 560 }: QuarterlyFundamentalChartProps) {
-  const labels = points.map((p) => `${p.year}Q${p.quarter}${p.source === "express" ? "·快报" : ""}`);
+  const labels = points.map(disclosureDate);
   const single = mode === "single";
 
   const pct = (v: number | null) => (v == null ? null : v * 100);
@@ -107,7 +111,8 @@ function QuarterlyFundamentalChartImpl({ points, mode, height = 560 }: Quarterly
       ...tooltipBase,
       formatter: (params: unknown) => {
         const arr = (Array.isArray(params) ? params : [params]) as TooltipParam[];
-        const head = arr[0]?.axisValueLabel ?? "";
+        const point = points[arr[0]?.dataIndex ?? -1];
+        const head = point ? `${disclosureDate(point)} · ${reportPeriod(point)}` : "";
         const lines = arr.map((p) => {
           const fmt = RATIO_SERIES.has(p.seriesName ?? "") ? fmtRatio : fmtYi;
           return `${p.marker ?? ""}${p.seriesName}: ${fmt(p.value)}`;
