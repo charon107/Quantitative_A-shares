@@ -215,10 +215,10 @@ function QuarterlyFundamentalChartImpl({
       timers.push(window.setTimeout(clearHighlight, 700));
     } else {
       // 等页面平滑滚动到季度图后再闪两次，效果与鼠标悬停同源。
-      timers.push(window.setTimeout(highlight, 700));
-      timers.push(window.setTimeout(clearHighlight, 1050));
-      timers.push(window.setTimeout(highlight, 1250));
-      timers.push(window.setTimeout(clearHighlight, 1600));
+      timers.push(window.setTimeout(highlight, 750));
+      timers.push(window.setTimeout(clearHighlight, 1400));
+      timers.push(window.setTimeout(highlight, 1850));
+      timers.push(window.setTimeout(clearHighlight, 2500));
     }
 
     return () => {
