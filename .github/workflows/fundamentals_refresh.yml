@@ -19,6 +19,14 @@ on:
         description: "全历史回填（首次或需要重建时勾选）"
         type: boolean
         default: false
+      backfill_start:
+        description: "财报回补起始日 YYYY-MM-DD（与 backfill_end 同填则走回补模式）"
+        type: string
+        default: ""
+      backfill_end:
+        description: "财报回补结束日 YYYY-MM-DD（含）"
+        type: string
+        default: ""
 
 concurrency:
   group: fundamentals-refresh
@@ -39,7 +47,9 @@ jobs:
       - name: 判断运行模式（全量 / 财报季每日增量 / 窗口外跳过）
         id: mode
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.event.schedule }}" = "23 1 5 5,9,11 *" ]; then
+          if [ -n "${{ github.event.inputs.backfill_start }}" ] && [ -n "${{ github.event.inputs.backfill_end }}" ]; then
+            echo "mode=backfill" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.event.schedule }}" = "23 1 5 5,9,11 *" ]; then
             echo "mode=full" >> "$GITHUB_OUTPUT"
           else
             # 每日增量：仅财报季窗口（北京日期 1-4 月 / 7-8 月 / 10 月）执行，窗口外秒退
@@ -66,6 +76,17 @@ jobs:
           if [ "${{ github.event.inputs.full }}" = "true" ]; then FLAG="--full"; fi
           uv run --no-project --with tushare --with pandas --with pyarrow --with numpy \
             python scripts/fetch_fundamentals_parquet.py --outdir artifacts_fund $FLAG
+
+      - name: runner 回补财报 -> parquet
+        if: steps.mode.outputs.mode == 'backfill'
+        env:
+          TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
+          TUSHARE_API_URL: ${{ secrets.TUSHARE_API_URL }}
+        run: |
+          uv run --no-project --with tushare --with pandas --with pyarrow --with numpy \
+            python scripts/backfill_earnings.py --outdir artifacts_fund \
+            --start "${{ github.event.inputs.backfill_start }}" \
+            --end "${{ github.event.inputs.backfill_end }}"
 
       - name: runner 按公告日增量抓取 -> parquet（财报季每日）
         if: steps.mode.outputs.mode == 'incremental'
@@ -110,7 +131,7 @@ jobs:
             # 先把服务器代码更新到与 runner 一致（load/选股逻辑随代码演进，旧代码跑新 parquet 会错位）；
             # bundle 模式：代码来自 scp 来的单文件，服务器不连 GitHub
             bash deploy/update.sh /tmp/ingest_fund/repo.bundle
-            if [ "${{ steps.mode.outputs.mode }}" = "incremental" ]; then
+            if [ "${{ steps.mode.outputs.mode }}" = "incremental" ] || [ "${{ steps.mode.outputs.mode }}" = "backfill" ]; then
               uv run python scripts/load_fundamentals.py /tmp/ingest_fund --incremental
             else
               uv run python scripts/load_fundamentals.py /tmp/ingest_fund

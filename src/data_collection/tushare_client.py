@@ -1092,46 +1092,43 @@ def fetch_express(code: str) -> pd.DataFrame:
     return _normalize_express_frame(df, cols)
 
 
-# disclosure_date 分页大小（代理单页上限 6000 行；period 参数被代理忽略，只能全量翻页）
-_DISCLOSURE_PAGE = 6000
-
-
 def fetch_disclosed_report_codes(date: str, tail_days: int = 2) -> list[str]:
     """实际披露日落在 [date-tail_days, date] 内的主板 code 列表（去重、升序）。
 
-    基于 disclosure_date（财报披露计划表）的 actual_date 实际披露日过滤——本代理
-    不支持 income/fina_indicator 的 ann_date 按日查询（返回空），只能全表分页拉取
-    后客户端过滤。tail_days 回溯几天重抓，吸收"披露日与代理报表数据入库存在 1-2 天
-    时间差"导致的当日抓空（漏抓代价高：次日名单就变了）。
+    对目标日及回溯 tail_days 天，逐日按 actual_date 精确查询 disclosure_date
+    （财报披露计划表），并校验返回行的 actual_date == 请求日期，防止代理静默
+    忽略参数。
+
+    不再用无过滤全量分页 + 本地过滤：代理的无过滤全量路径 actual_date 列会停更
+    （实测最大到 2026-07-24，此后披露的股票该列仍为 null、只有 pre_date 有预约
+    日），而 actual_date 精确查询路径的数据保持新鲜。tail_days 回溯几天重抓，
+    吸收"披露日与代理报表数据入库存在 1-2 天时间差"导致的当日抓空（漏抓代价高：
+    次日名单就变了）。
 
     date 用 'YYYY-MM-DD'。财报季每日增量抓取用。
     """
-    frames: list[pd.DataFrame] = []
-    offset = 0
-    while True:
+    target = pd.Timestamp(date)
+    codes: list[str] = []
+    for back in range(tail_days + 1):
+        day = target - pd.Timedelta(days=back)
+        day_str = day.strftime("%Y%m%d")
         df = _call_with_retry(
-            f"fetch_disclosure_date(offset={offset})",
+            f"fetch_disclosure_date(actual_date={day_str})",
             _pro().disclosure_date,
-            limit=_DISCLOSURE_PAGE,
-            offset=offset,
+            actual_date=day_str,
             fields="ts_code,end_date,actual_date",
         )
         if df is None or df.empty:
-            break
-        frames.append(df)
-        if len(df) < _DISCLOSURE_PAGE:
-            break
-        offset += _DISCLOSURE_PAGE
-    if not frames:
+            continue
+        df = _from_ts_code_batch(df)
+        # 校验代理确实按 actual_date 过滤：返回行的 actual_date 必须等于请求日期
+        actual = pd.to_datetime(df["actual_date"], format="%Y%m%d", errors="coerce")
+        df = df[actual == day]
+        codes.extend(df["code"].astype(str).tolist())
+    if not codes:
         return []
-    all_df = pd.concat(frames, ignore_index=True)
-    all_df = _from_ts_code_batch(all_df)
-    actual = pd.to_datetime(all_df["actual_date"], format="%Y%m%d", errors="coerce")
-    target = pd.Timestamp(date)
-    lo = target - pd.Timedelta(days=tail_days)
-    mask = (actual >= lo) & (actual <= target)
-    codes = all_df.loc[mask, "code"].astype(str)
-    mainboard = codes[codes.str.match(r"^(sh\.60|sz\.00)\d{4}$", na=False)]
+    mainboard = pd.Series(codes)
+    mainboard = mainboard[mainboard.str.match(r"^(sh\.60|sz\.00)\d{4}$", na=False)]
     return sorted(mainboard.unique().tolist())
 
 

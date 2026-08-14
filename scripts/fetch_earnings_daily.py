@@ -3,9 +3,9 @@
 三类披露来源（受代理能力约束，见各 fetcher 注）：
   - 业绩预告：forecast 支持 ann_date 按日全市场查询，单次直取（零逐股调用）
   - 正式财报：代理不支持 income/fina_indicator 的 ann_date 按日查询，改走
-    disclosure_date（披露计划表）分页全量拉取，按 actual_date 实际披露日过滤
-    （含 2 天回溯尾，吸收披露日与代理数据入库的时间差），名单内股票逐只补
-    四张报表 raw（每股 7 次调用，与全量 _fetch_one 相同）
+    disclosure_date（披露计划表）按 actual_date 精确查询（含 2 天回溯尾，
+    吸收披露日与代理数据入库的时间差），名单内股票逐只补四张报表 raw
+    （每股 7 次调用，与全量 _fetch_one 相同）
   - 业绩快报：代理仅支持逐股查询。--express-sweep 开启时全主板逐股扫描
     （快报非强制披露、集中在 1-2 月 / 7-8 月，workflow 只在这两个窗口开启；
     约 3200 次调用 @90次/分 ≈ 36 分钟）
@@ -101,11 +101,24 @@ def main() -> None:
     forecast_day = tsc.fetch_forecast_by_date(date)
     print(f"[fetch_earnings] {date} 预告 {len(forecast_day)} 行", flush=True)
 
-    # 2) 正式财报：disclosure_date 全表分页，按实际披露日过滤（含 2 天回溯尾）
+    # 2) 正式财报：disclosure_date 按 actual_date 精确查询（含 2 天回溯尾）
     report_codes = tsc.fetch_disclosed_report_codes(date, tail_days=2)
     if args.limit:
         report_codes = report_codes[: args.limit]
     print(f"[fetch_earnings] {date} 正式财报（含回溯尾）{len(report_codes)} 只", flush=True)
+    if not report_codes:
+        # 交易日却拿不到任何正式财报名单，通常是上游名单停更而非当日真无披露，显式告警
+        try:
+            is_trading_day = bool(tsc.fetch_trade_dates(date, date))
+        except Exception:
+            is_trading_day = False
+        if is_trading_day:
+            print(
+                f"[fetch_earnings] 警告：{date} 为交易日但正式财报名单为空（含回溯 {tail_days} 天）。"
+                f"若非财报季空窗，请检查代理 disclosure_date(actual_date=...) 是否停更。",
+                file=sys.stderr,
+                flush=True,
+            )
 
     per_stock: dict[str, list[pd.DataFrame]] = {
         k: [] for k in ("annual", "quarterly", "dividend", "forecast", "express")
