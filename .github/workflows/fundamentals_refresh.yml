@@ -19,6 +19,10 @@ on:
         description: "全历史回填（首次或需要重建时勾选）"
         type: boolean
         default: false
+      incremental_date:
+        description: "每日增量目标日 YYYY-MM-DD（填写后走增量模式）"
+        type: string
+        default: ""
       backfill_start:
         description: "财报回补起始日 YYYY-MM-DD（与 backfill_end 同填则走回补模式）"
         type: string
@@ -46,16 +50,34 @@ jobs:
 
       - name: 判断运行模式（全量 / 财报季每日增量 / 窗口外跳过）
         id: mode
+        env:
+          INCREMENTAL_DATE: ${{ github.event.inputs.incremental_date }}
         run: |
           if [ -n "${{ github.event.inputs.backfill_start }}" ] && [ -n "${{ github.event.inputs.backfill_end }}" ]; then
             echo "mode=backfill" >> "$GITHUB_OUTPUT"
+          elif [ -n "$INCREMENTAL_DATE" ]; then
+            TARGET_DATE="$INCREMENTAL_DATE"
+            NORMALIZED_DATE=$(date -d "$TARGET_DATE" +%F 2>/dev/null || true)
+            if [ "$NORMALIZED_DATE" != "$TARGET_DATE" ]; then
+              echo "::error::incremental_date 必须是有效的 YYYY-MM-DD 日期"
+              exit 1
+            fi
+            M=$(date -d "$TARGET_DATE" +%-m)
+            echo "mode=incremental" >> "$GITHUB_OUTPUT"
+            echo "target_date=$TARGET_DATE" >> "$GITHUB_OUTPUT"
+            # 业绩快报代理只支持逐股查询，仅在快报密集窗口开启逐股扫描
+            if [ "$M" -le 2 ] || [ "$M" -eq 7 ] || [ "$M" -eq 8 ]; then
+              echo "express_flag=--express-sweep" >> "$GITHUB_OUTPUT"
+            fi
           elif [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.event.schedule }}" = "23 1 5 5,9,11 *" ]; then
             echo "mode=full" >> "$GITHUB_OUTPUT"
           else
             # 每日增量：仅财报季窗口（北京日期 1-4 月 / 7-8 月 / 10 月）执行，窗口外秒退
-            M=$(TZ=Asia/Shanghai date +%-m)
+            TARGET_DATE=$(TZ=Asia/Shanghai date +%F)
+            M=$(date -d "$TARGET_DATE" +%-m)
             if [ "$M" -le 4 ] || [ "$M" -eq 7 ] || [ "$M" -eq 8 ] || [ "$M" -eq 10 ]; then
               echo "mode=incremental" >> "$GITHUB_OUTPUT"
+              echo "target_date=$TARGET_DATE" >> "$GITHUB_OUTPUT"
               # 业绩快报代理只支持逐股查询，扫描成本高（~36 分钟），只在快报密集窗口
               #（1-2 月年度快报、7-8 月半年报快报）开启逐股扫描
               if [ "$M" -le 2 ] || [ "$M" -eq 7 ] || [ "$M" -eq 8 ]; then
@@ -96,7 +118,7 @@ jobs:
         run: |
           uv run --no-project --with tushare --with pandas --with pyarrow --with numpy \
             python scripts/fetch_earnings_daily.py --outdir artifacts_fund \
-            --date "$(TZ=Asia/Shanghai date +%F)" ${{ steps.mode.outputs.express_flag }}
+            --date "${{ steps.mode.outputs.target_date }}" ${{ steps.mode.outputs.express_flag }}
 
       - name: 打代码 bundle（服务器免连 GitHub，随 parquet 一起 scp）
         if: steps.mode.outputs.mode != 'skip'
