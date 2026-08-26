@@ -101,8 +101,9 @@ def main() -> None:
     forecast_day = tsc.fetch_forecast_by_date(date)
     print(f"[fetch_earnings] {date} 预告 {len(forecast_day)} 行", flush=True)
 
-    # 2) 正式财报：disclosure_date 按 actual_date 精确查询（含 2 天回溯尾）
-    report_codes = tsc.fetch_disclosed_report_codes(date, tail_days=2)
+    # 2) 正式财报：disclosure_date 按 actual_date 精确查询（含回溯尾）
+    tail_days = 2
+    report_codes = tsc.fetch_disclosed_report_codes(date, tail_days=tail_days)
     if args.limit:
         report_codes = report_codes[: args.limit]
     print(f"[fetch_earnings] {date} 正式财报（含回溯尾）{len(report_codes)} 只", flush=True)
