@@ -106,6 +106,10 @@ def main() -> None:
     od = args.outdir
     os.makedirs(od, exist_ok=True)
 
+    # 网关探活：token 失效时 tushare 的 DataApi.query 会静默返回空表，
+    # 这里直接抛 TushareFatalError，避免抓取脚本"成功但零数据"空跑
+    tsc.assert_gateway_ok()
+
     codes = _mainboard_codes()
     if args.limit:
         codes = codes[: args.limit]

@@ -55,6 +55,10 @@ def main() -> None:
 
     tsc.configure_rate_limiter(threading.Lock(), _NextAllowed())
 
+    # 网关探活：token 失效时 tushare 的 DataApi.query 会静默返回空表，
+    # 这里直接抛 TushareFatalError，避免抓取脚本"成功但零数据"空跑
+    tsc.assert_gateway_ok()
+
     # 逐日取名单（tail_days=0：回补区间已覆盖全部披露日），跨日并集去重
     codes: set[str] = set()
     for d in _iter_dates(args.start, args.end):

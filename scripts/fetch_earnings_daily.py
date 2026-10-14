@@ -97,6 +97,10 @@ def main() -> None:
     # 全局限速器：所有线程共享同一个"下一次允许调用"时间戳，总速率恒为 90 次/分
     tsc.configure_rate_limiter(threading.Lock(), _NextAllowed())
 
+    # 网关探活：token 失效时 tushare 的 DataApi.query 会静默返回空表，
+    # 这里直接抛 TushareFatalError，避免抓取脚本"成功但零数据"空跑
+    tsc.assert_gateway_ok()
+
     # 1) 业绩预告：按公告日单次全市场查询
     forecast_day = tsc.fetch_forecast_by_date(date)
     print(f"[fetch_earnings] {date} 预告 {len(forecast_day)} 行", flush=True)
