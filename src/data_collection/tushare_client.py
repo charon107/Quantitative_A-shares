@@ -138,7 +138,7 @@ def _call_with_retry(label: str, fn, *args, **kwargs):
             return fn(*args, **kwargs)
         except Exception as e:
             msg = str(e)
-            if any(k in msg for k in FATAL_KEYWORDS):
+            if any(k.lower() in msg.lower() for k in FATAL_KEYWORDS):
                 raise TushareFatalError(msg) from e
             last_err = e
             if attempt < MAX_RETRIES:
@@ -146,6 +146,43 @@ def _call_with_retry(label: str, fn, *args, **kwargs):
                 print(f"[Retry {attempt}/{MAX_RETRIES}] {label}, wait {wait:.1f}s: {e}")
                 time.sleep(wait)
     raise RuntimeError(f"{label} failed after {MAX_RETRIES} retries: {last_err}")
+
+
+def assert_gateway_ok(timeout: float = 30.0) -> None:
+    """探活 tushare 网关：非 2xx 或返回错误码立即抛 TushareFatalError。
+
+    背景：tushare 的 DataApi.query 用 ``if res:`` 判断响应，HTTP 4xx（例如代理
+    返回 401「Token 已过期」）时 requests.Response 为假值，会静默返回空
+    DataFrame。调用方只看到"没有数据"而不是报错——2026-09 就因此静默停更了半个
+    多月。抓取脚本开头调用本函数，可让 token 失效在第一时间以非零退出码暴露。
+    """
+    import requests
+
+    client = _pro()  # 顺带校验 TUSHARE_TOKEN 已配置
+    url = str(client._DataApi__http_url).rstrip("/")
+    payload = {
+        "api_name": "trade_cal",
+        "token": TUSHARE_TOKEN,
+        "params": {"exchange": "SSE", "start_date": "20250101", "end_date": "20250103"},
+        "fields": "cal_date",
+    }
+    try:
+        resp = requests.post(f"{url}/trade_cal", json=payload, timeout=timeout)
+    except Exception as e:  # noqa: BLE001 - 网络异常统一转成致命错误
+        raise TushareFatalError(f"tushare 网关不可达：{url} -> {e}") from e
+    if resp.status_code != 200:
+        raise TushareFatalError(
+            f"tushare 网关鉴权失败：HTTP {resp.status_code} "
+            f"{(resp.text or '').strip()[:200]}（token 过期/失效或网关异常）"
+        )
+    try:
+        body = resp.json()
+    except ValueError as e:
+        raise TushareFatalError(f"tushare 网关响应非 JSON：{(resp.text or '')[:200]}") from e
+    if body.get("error"):
+        raise TushareFatalError(f"tushare 网关报错：{body['error']}")
+    if body.get("code") not in (0, None):
+        raise TushareFatalError(f"tushare 网关报错：{body.get('msg') or body}")
 
 
 def fetch_stock_basic() -> pd.DataFrame:

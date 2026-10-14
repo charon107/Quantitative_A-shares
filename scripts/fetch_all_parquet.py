@@ -57,8 +57,13 @@ def main() -> None:
     od = args.outdir
     os.makedirs(od, exist_ok=True)
 
+    # 抓取前先探活网关：token 过期时 tushare 会静默返回空表（见 tushare_client.assert_gateway_ok）
+    tsc.assert_gateway_ok()
+
     days = _recent_days(args.days)
     print(f"[fetch_all] 最近交易日：{days}")
+    if not days:
+        sys.exit("[fetch_all] 错误：取不到任何交易日（token 过期或网关异常），终止以避免写入空数据。")
 
     raw_all, adj_all, val_all = [], [], []
     for d in days:
@@ -79,6 +84,11 @@ def main() -> None:
     raw_df = pd.concat(raw_all, ignore_index=True) if raw_all else pd.DataFrame()
     adj_df = pd.concat(adj_all, ignore_index=True) if adj_all else pd.DataFrame()
     val_df = pd.concat(val_all, ignore_index=True) if val_all else pd.DataFrame()
+    if raw_df.empty:
+        sys.exit(
+            f"[fetch_all] 错误：{len(days)} 个交易日未取到任何日线，终止以避免空数据静默入库"
+            "（检查 token / 网关）。"
+        )
     raw_df.to_parquet(f"{od}/raw_recent.parquet", index=False)
     adj_df.to_parquet(f"{od}/adj_recent.parquet", index=False)
     val_df.to_parquet(f"{od}/valuation_recent.parquet", index=False)
