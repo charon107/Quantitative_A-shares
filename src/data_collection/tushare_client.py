@@ -40,6 +40,10 @@ MAX_PACE = float(os.environ.get("TUSHARE_MAX_PACE", "0.4"))
 MAX_CALLS_PER_MIN = float(os.environ.get("TUSHARE_MAX_CALLS_PER_MIN", "100"))
 MIN_CALL_INTERVAL = 60.0 / (MAX_CALLS_PER_MIN * 0.9)
 
+# 网关探活的重试次数（网络类瞬时错误，不含鉴权失败）。默认 4 次、每次读超时
+# 30s + 指数退避，最坏 ~150s 后仍然致命退出。
+PROBE_ATTEMPTS = int(os.environ.get("TUSHARE_PROBE_ATTEMPTS", "4"))
+
 # 命中这些关键字视为永久性错误（token 无效/权限不足/积分不够等），重试无意义，立即熔断；
 # 限流类报错（"频率"/"每分钟"）不在此列，仍走指数退避重试。
 FATAL_KEYWORDS = ("token", "权限", "积分")
@@ -142,22 +146,73 @@ def _call_with_retry(label: str, fn, *args, **kwargs):
                 raise TushareFatalError(msg) from e
             last_err = e
             if attempt < MAX_RETRIES:
-                wait = min(BACKOFF_CAP, (BACKOFF_BASE ** (attempt - 1)) + random.uniform(0, 1.5))
+                wait = _backoff_delay(attempt)
                 print(f"[Retry {attempt}/{MAX_RETRIES}] {label}, wait {wait:.1f}s: {e}")
                 time.sleep(wait)
     raise RuntimeError(f"{label} failed after {MAX_RETRIES} retries: {last_err}")
 
 
+# 网关状态码里属于"瞬时"的一类：代理过载/上游重启时常见，重试能自愈；
+# 其余非 200（401/403/404 等）视为鉴权/配置问题，立即致命无需重试。
+TRANSIENT_HTTP_STATUS = frozenset({408, 425, 429, 500, 502, 503, 504})
+
+
+class _TransientProbeError(RuntimeError):
+    """探活遇到的瞬时错误（超时/连接失败/5xx/非 JSON 响应体），可退避重试。"""
+
+
+def _backoff_delay(attempt: int) -> float:
+    return min(BACKOFF_CAP, (BACKOFF_BASE ** (attempt - 1)) + random.uniform(0, 1.5))
+
+
+def _probe_gateway_once(url: str, payload: dict, timeout: float) -> None:
+    """发一次探活请求并校验响应体。
+
+    瞬时错误抛 _TransientProbeError（调用方可以重试），鉴权/业务错误抛
+    TushareFatalError（重试无意义，立即熔断）。
+    """
+    import requests
+
+    try:
+        resp = requests.post(f"{url}/trade_cal", json=payload, timeout=timeout)
+    except Exception as e:  # requests 异常层级不稳定，统一按瞬时处理
+        raise _TransientProbeError(str(e)) from e
+    if resp.status_code in TRANSIENT_HTTP_STATUS:
+        raise _TransientProbeError(f"HTTP {resp.status_code} {(resp.text or '').strip()[:200]}")
+    if resp.status_code != 200:
+        # 401/403/404 等：token 过期或网关路由变化，重试无意义
+        raise TushareFatalError(
+            f"tushare 网关鉴权失败：HTTP {resp.status_code} "
+            f"{(resp.text or '').strip()[:200]}（token 过期/失效或网关异常）"
+        )
+    try:
+        body = resp.json()
+    except ValueError as e:
+        # 200 但不是 JSON：多半是代理的临时错误页
+        raise _TransientProbeError(f"响应非 JSON：{(resp.text or '')[:200]}") from e
+    if not isinstance(body, dict):
+        raise _TransientProbeError(f"响应体结构异常：{str(body)[:200]}")
+    if body.get("error"):
+        raise TushareFatalError(f"tushare 网关报错：{body['error']}")
+    if body.get("code") not in (0, None):
+        raise TushareFatalError(f"tushare 网关报错：{body.get('msg') or body}")
+
+
 def assert_gateway_ok(timeout: float = 30.0) -> None:
-    """探活 tushare 网关：非 2xx 或返回错误码立即抛 TushareFatalError。
+    """探活 tushare 网关：网络抖动退避重试，鉴权失败/错误码立即抛 TushareFatalError。
 
     背景：tushare 的 DataApi.query 用 ``if res:`` 判断响应，HTTP 4xx（例如代理
     返回 401「Token 已过期」）时 requests.Response 为假值，会静默返回空
     DataFrame。调用方只看到"没有数据"而不是报错——2026-09 就因此静默停更了半个
     多月。抓取脚本开头调用本函数，可让 token 失效在第一时间以非零退出码暴露。
-    """
-    import requests
 
+    但"探活失败"不等于"token 失效"：2026-10-16 的定时任务就死在一次 30s 读超时
+    上（代理瞬时抖动，6 分钟前的另一次运行还正常），单次探测过严会让当天增量
+    数据整批白丢。因此这里区分两类错误：
+      * 网络类瞬时错误（超时/连接异常/5xx/429/非 JSON）-> 指数退避重试；
+      * 鉴权/协议类错误（401/403 等非 200、body.error、code != 0）-> 立即致命。
+    重试耗尽后仍以 TushareFatalError 非零退出，"静默空跑"的防线不变。
+    """
     client = _pro()  # 顺带校验 TUSHARE_TOKEN 已配置
     url = str(client._DataApi__http_url).rstrip("/")
     payload = {
@@ -166,23 +221,25 @@ def assert_gateway_ok(timeout: float = 30.0) -> None:
         "params": {"exchange": "SSE", "start_date": "20250101", "end_date": "20250103"},
         "fields": "cal_date",
     }
-    try:
-        resp = requests.post(f"{url}/trade_cal", json=payload, timeout=timeout)
-    except Exception as e:  # noqa: BLE001 - 网络异常统一转成致命错误
-        raise TushareFatalError(f"tushare 网关不可达：{url} -> {e}") from e
-    if resp.status_code != 200:
-        raise TushareFatalError(
-            f"tushare 网关鉴权失败：HTTP {resp.status_code} "
-            f"{(resp.text or '').strip()[:200]}（token 过期/失效或网关异常）"
-        )
-    try:
-        body = resp.json()
-    except ValueError as e:
-        raise TushareFatalError(f"tushare 网关响应非 JSON：{(resp.text or '')[:200]}") from e
-    if body.get("error"):
-        raise TushareFatalError(f"tushare 网关报错：{body['error']}")
-    if body.get("code") not in (0, None):
-        raise TushareFatalError(f"tushare 网关报错：{body.get('msg') or body}")
+
+    last_err: object = None
+    for attempt in range(1, PROBE_ATTEMPTS + 1):
+        try:
+            _probe_gateway_once(url, payload, timeout)
+            return
+        except _TransientProbeError as e:
+            last_err = e
+            if attempt < PROBE_ATTEMPTS:
+                wait = _backoff_delay(attempt)
+                print(
+                    f"[ProbeRetry {attempt}/{PROBE_ATTEMPTS}] tushare 网关探测失败，"
+                    f"wait {wait:.1f}s: {e}",
+                    flush=True,
+                )
+                time.sleep(wait)
+    raise TushareFatalError(
+        f"tushare 网关不可达（探测 {PROBE_ATTEMPTS} 次全部失败）：{url} -> {last_err}"
+    )
 
 
 def fetch_stock_basic() -> pd.DataFrame:
